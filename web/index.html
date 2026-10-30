@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>glbsmith</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<header>
+    <h1>glbsmith</h1>
+    <p data-i18n="tagline"></p>
+    <label class="lang"><span class="sr" data-i18n="language"></span>
+        <select id="language"><option value="ja">日本語</option><option value="en">English</option></select>
+    </label>
+</header>
+
+<main>
+    <section class="panel form-panel">
+        <form id="form">
+            <label class="dropzone" id="dropzone" tabindex="0">
+                <input type="file" id="image" accept="image/*" hidden>
+                <img id="preview" alt="" hidden>
+                <span id="dropHint" data-i18n="drop"></span>
+            </label>
+            <label class="field"><span data-i18n="name"></span>
+                <input type="text" id="name" maxlength="120" data-i18n-placeholder="namePlaceholder"></label>
+            <div class="sizes">
+                <label class="field"><span data-i18n="width"></span><span class="unit"><input type="number" id="width" min="0.1" max="2000" step="0.1" required><em>cm</em></span></label>
+                <label class="field"><span data-i18n="depth"></span><span class="unit"><input type="number" id="depth" min="0.1" max="2000" step="0.1" required><em>cm</em></span></label>
+                <label class="field"><span data-i18n="height"></span><span class="unit"><input type="number" id="height" min="0.1" max="2000" step="0.1" required><em>cm</em></span></label>
+            </div>
+            <fieldset class="field">
+                <legend data-i18n="agent"></legend>
+                <div id="agents" class="agents"></div>
+            </fieldset>
+            <label class="field"><span data-i18n="model"></span>
+                <select id="modelSelect"></select></label>
+            <label class="field" id="modelCustom" hidden><span data-i18n="modelName"></span>
+                <input type="text" id="model" maxlength="80"></label>
+            <p class="note warn" id="noBlender" hidden data-i18n="noBlender"></p>
+            <label class="note warn" id="noSandbox" hidden><input type="checkbox" id="allowUnsandboxed"> <span data-i18n="noSandbox"></span></label>
+            <button type="submit" class="primary" id="submit" data-i18n="create"></button>
+            <p class="note" data-i18n="quotaNote"></p>
+            <p class="note error" id="formError" role="alert" hidden></p>
+        </form>
+        <h2 data-i18n="history"></h2>
+        <ul class="history" id="history"></ul>
+    </section>
+
+    <section class="panel result-panel" id="result" hidden>
+        <div class="result-head">
+            <div>
+                <h2 id="resultTitle"></h2>
+                <p class="status" id="status" role="status"></p>
+            </div>
+            <div class="actions">
+                <button type="button" id="cancel" data-i18n="cancel" hidden></button>
+                <a class="button primary" id="download" data-i18n="download" hidden></a>
+            </div>
+        </div>
+        <div class="compare">
+            <figure><figcaption data-i18n="photo"></figcaption><img id="reference" alt=""></figure>
+            <figure class="viewer-wrap" id="viewerWrap">
+                <figcaption data-i18n="result"></figcaption>
+                <div id="viewer"></div>
+                <p class="measure" id="measure"></p>
+            </figure>
+        </div>
+        <p class="note warn" id="sizeNote" hidden></p>
+        <p class="note warn" id="checkNote" hidden></p>
+        <p class="message" id="message"></p>
+        <h3 id="rendersTitle" data-i18n="renders" hidden></h3>
+        <div class="renders" id="renders"></div>
+        <details><summary data-i18n="log"></summary><ol class="log" id="log"></ol></details>
+    </section>
+
+    <section class="panel empty" id="empty"><p data-i18n="empty"></p></section>
+</main>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
