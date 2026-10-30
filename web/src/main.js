@@ -1,5 +1,7 @@
 import { apply, getLanguage, setLanguage, t } from './i18n.js';
+import { ModelPicker } from './models.js';
 import { paintMask } from './paint.js';
+import { closeRevise, openRevise, relabelRevise } from './revise.js';
 import { Viewer } from './viewer.js';
 
 const $ = id => document.getElementById(id);
@@ -78,38 +80,10 @@ for (const type of ['dragleave', 'drop']) $('dropzone').addEventListener(type, e
 $('dropzone').addEventListener('drop', e => addPhotos(e.dataTransfer.files));
 addEventListener('paste', e => addPhotos(e.clipboardData.files));
 
-// ---- model choice: what each agent's CLI says is available ----
-const OTHER = '__other__';
-const modelLists = new Map();
+// ---- model choice ----
 const selectedAgent = () => document.querySelector('input[name=agent]:checked')?.value;
-
-function renderModels() {
-    const select = $('modelSelect');
-    const previous = select.value;
-    const list = modelLists.get(selectedAgent()) ?? { default: null, options: [] };
-    const option = (value, label) => Object.assign(document.createElement('option'), { value, textContent: label });
-    select.replaceChildren(
-        option('', list.default ? t('modelDefaultNamed', { name: list.default }) : t('modelDefault')),
-        ...list.options.map(m => option(m.id, m.label === m.id ? m.id : `${m.label} (${m.id})`)),
-        option(OTHER, t('modelOther')),
-    );
-    if ([...select.options].some(o => o.value === previous)) select.value = previous;
-    $('modelCustom').hidden = select.value !== OTHER;
-}
-
-async function loadModels(agent) {
-    if (agent && !modelLists.has(agent)) {
-        try {
-            modelLists.set(agent, await api(`/api/agents/${agent}/models`));
-        } catch {
-            return; // the default and typing a name still work
-        }
-    }
-    if (agent === selectedAgent()) renderModels();
-}
-
-$('modelSelect').addEventListener('change', () => { $('modelCustom').hidden = $('modelSelect').value !== OTHER; });
-$('agents').addEventListener('change', () => { $('modelSelect').value = ''; renderModels(); loadModels(selectedAgent()); });
+const modelPicker = new ModelPicker({ select: $('modelSelect'), customField: $('modelCustom'), custom: $('model'), agent: selectedAgent });
+$('agents').addEventListener('change', () => modelPicker.load(''));
 
 function renderAgents() {
     const host = $('agents');
@@ -125,8 +99,7 @@ function renderAgents() {
     }));
     const pick = host.querySelector(`input[value="${chosen}"]`) ?? host.querySelector('input:not(:disabled)');
     if (pick && !pick.disabled) pick.checked = true;
-    renderModels();
-    loadModels(selectedAgent());
+    modelPicker.load();
 }
 
 $('form').addEventListener('submit', async e => {
@@ -141,7 +114,7 @@ $('form').addEventListener('submit', async e => {
         form.append('masks', photo.mask ?? new Blob([]), 'mask.png');
     }
     for (const id of ['width', 'depth', 'height', 'name']) form.set(id, $(id).value);
-    form.set('model', $('modelSelect').value === OTHER ? $('model').value.trim() : $('modelSelect').value);
+    form.set('model', modelPicker.value());
     form.set('agent', agent);
     form.set('allow_unsandboxed', $('allowUnsandboxed').checked ? 'true' : 'false');
     $('submit').disabled = true;
@@ -207,6 +180,7 @@ function renderHistory() {
         text.textContent = job.brief.name || t('untitled');
         const detail = document.createElement('small');
         detail.textContent = [t(`status.${job.status}`), job.agent, job.model].filter(Boolean).join(' · ');
+        if (job.revision_number) text.prepend(`${t('revision', { n: job.revision_number })}: `);
         text.append(detail);
         button.append(image, text);
         item.append(button);
@@ -275,6 +249,7 @@ async function renderState(job) {
     $('checkNote').textContent = verdict === 'fail' ? t('checkFailed', { overlap: check.overlap }) : t('checkUnreliable');
     if (job.has_model) {
         const url = `/api/jobs/${job.id}/model.glb`;
+        $('reviseStart').hidden = false;
         const download = $('download');
         download.href = url;
         download.download = `${(job.brief.name || 'model').replace(/[^\p{L}\p{N} _-]/gu, '_')}.glb`;
@@ -295,6 +270,9 @@ async function renderState(job) {
     await refreshHistory();
 }
 
+let currentJob = null;
+const titleOf = job => (job.revision_number ? `${job.brief.name || t('untitled')} · ${t('revision', { n: job.revision_number })}` : job.brief.name || t('untitled'));
+
 function showReferences(id, count) {
     const pick = number => {
         $('reference').src = `/api/jobs/${id}/reference/${number}`;
@@ -311,6 +289,8 @@ function showReferences(id, count) {
 
 function show(id) {
     currentId = id;
+    closeRevise();
+    $('reviseStart').hidden = true;
     source?.close();
     viewer.clear();
     $('empty').hidden = true;
@@ -326,20 +306,31 @@ function show(id) {
     delete $('viewer').dataset.loaded;
     const job = history.find(j => j.id === id);
     showReferences(id, job?.photos?.length ?? 1);
-    $('resultTitle').textContent = job?.brief.name || t('untitled');
+    $('resultTitle').textContent = job ? titleOf(job) : t('untitled');
     renderHistory();
     source = new EventSource(`/api/jobs/${id}/events`);
     source.onmessage = message => { if (id === currentId) onEvent(JSON.parse(message.data)); };
     source.addEventListener('state', message => {
         const state = JSON.parse(message.data);
         if (id !== currentId) return;
-        $('resultTitle').textContent = state.brief.name || t('untitled');
+        currentJob = state;
+        $('resultTitle').textContent = titleOf(state);
         renderState(state);
         if (state.status !== 'queued' && state.status !== 'running') source.close();
     });
 }
 
 $('cancel').addEventListener('click', () => api(`/api/jobs/${currentId}/cancel`, { method: 'POST' }));
+$('reviseStart').addEventListener('click', () => openRevise({
+    viewer, agents: status.agents.filter(agent => agent.available), job: currentJob,
+    async submit(body) {
+        const job = await api(`/api/jobs/${currentJob.id}/revise`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        });
+        await refreshHistory();
+        show(job.id);
+    },
+}));
 
 // ---- start ----
 $('language').value = getLanguage();
@@ -348,6 +339,7 @@ $('language').addEventListener('change', async e => {
     renderAgents();
     renderPhotos();
     renderHistory();
+    relabelRevise();
     renderLoad(await api('/api/settings'));
 });
 apply();

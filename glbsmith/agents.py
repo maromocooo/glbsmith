@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent
-PROMPT = (PROJECT / "prompts" / "modeler.md").read_text()
+PROMPTS = {name: (PROJECT / "prompts" / f"{name}.md").read_text() for name in ("modeler", "reviser")}
+
+
+def prompt_for(job: Path) -> str:
+    brief = json.loads((job / "brief.json").read_text())
+    return PROMPTS["reviser" if brief.get("revision") else "modeler"]
 
 # Never let a job fall back to pay-per-use API billing, and do not look like a
 # nested session when started from inside one.
@@ -78,7 +83,7 @@ class ClaudeAgent:
                "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence"]
         if model:
             cli += ["--model", model]
-        return Launch(cli, PROMPT, agent_env())
+        return Launch(cli, prompt_for(job), agent_env())
 
     def parse(self, line: str) -> list[dict]:
         event = json.loads(line)
@@ -144,7 +149,7 @@ class CodexAgent:
             cli += ["-m", model]
         if effort:
             cli += ["-c", f'model_reasoning_effort="{effort}"']
-        return Launch([*cli, "-"], PROMPT, agent_env())
+        return Launch([*cli, "-"], prompt_for(job), agent_env())
 
     def parse(self, line: str) -> list[dict]:
         event = json.loads(line)

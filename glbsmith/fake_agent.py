@@ -29,6 +29,16 @@ def say(**event) -> None:
     print(json.dumps(event), flush=True)
 
 
+# Makes the upper part 1.5 times as tall, like an instruction to lengthen it.
+REVISE = """
+import bpy
+top = bpy.data.objects["top"]
+grow = top.dimensions.z * 0.5
+top.scale.z *= 1.5
+top.location.z += grow / 2
+"""
+
+
 async def main(job: str) -> None:
     brief = json.load(open(f"{job}/brief.json"))
     pause = float(os.environ.get("GLBSMITH_FAKE_PAUSE", "0"))
@@ -41,6 +51,13 @@ async def main(job: str) -> None:
             await asyncio.sleep(pause)
             return await session.call_tool(name, args)
 
+        if brief.get("revision"):
+            await call("get_revision_requests")
+            await call("run_python", code=REVISE)
+            await call("render_views", views=["front"], show_marks=True)
+            await call("finalize")
+            say(kind="text", text="Fake agent: made the upper part taller.")
+            return
         await call("get_brief")
         say(kind="text", text="Fake agent: building two boxes.")
         await call("run_python", code=BUILD.format(**brief))

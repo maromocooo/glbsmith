@@ -96,7 +96,26 @@ figcaption { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .renders { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .renders a { display: block; } .renders img { width: 100%; display: block; border-radius: 6px; border: 1px solid var(--border); }
 details { margin-top: 14px; }
+.revise { margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 10px; }
+.revise h3 { margin: 0; }
+.revise .paint-tools, .revise .paint-actions { margin-top: 0; }
+.revise .paint-tools button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+.colours { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.colours li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.colours .swatch { width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 3px solid transparent; outline: 1px solid var(--border); }
+.colours .swatch[aria-pressed=true] { border-color: var(--text); }
+.colours button.remove { padding: 4px 9px; }
+textarea { width: 100%; padding: 8px 10px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; resize: vertical; min-width: 0; }
 .log { margin: 8px 0 0; padding-left: 20px; font-size: 12px; color: var(--muted); max-height: 260px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Making changes: the model and the instructions side by side. */
+@media (min-width: 861px) {
+    .result-panel.revising { display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 0 16px; align-items: start; }
+    .result-panel.revising > * { grid-column: 1 / -1; }
+    .result-panel.revising > .compare { grid-column: 1; grid-template-columns: minmax(0, 1fr); position: sticky; top: 8px; }
+    .result-panel.revising > .revise { grid-column: 2; }
+    .result-panel.revising .compare > figure:first-child { display: none; }
+    .result-panel.revising #viewer { height: min(68vh, 640px); }
+}
 @media (max-width: 860px) {
     main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
     header { padding: 14px 16px; }

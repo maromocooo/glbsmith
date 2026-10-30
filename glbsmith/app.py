@@ -1,6 +1,7 @@
 """Web app: python -m glbsmith.app (http://127.0.0.1:8021)."""
 
 import asyncio
+import base64
 import io
 import json
 import os
@@ -13,6 +14,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFil
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from .agents import AGENTS
 from .blender_client import blender_binary
@@ -24,6 +26,24 @@ MAX_UPLOAD = 25 * 1024 * 1024
 MAX_PHOTOS = 8
 MAX_SIZE_CM = 2000
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+MAX_COLOURS = 5
+MAX_SPOTS = 4000
+MAX_INSTRUCTION = 4000
+
+
+class PaintRequest(BaseModel):
+    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    prompt: str = Field(min_length=1, max_length=MAX_INSTRUCTION)
+    # [x, y, z, radius] in metres, on the GLB as the page showed it.
+    points: list[tuple[float, float, float, float]] = Field(min_length=1, max_length=MAX_SPOTS)
+
+
+class Revision(BaseModel):
+    requests: list[PaintRequest] = Field(default=[], max_length=MAX_COLOURS)
+    general: str = Field(default="", max_length=MAX_INSTRUCTION)
+    agent: str
+    model: str | None = None
+    view: str | None = None  # PNG data URL of what the person was looking at
 
 
 def landlock_abi() -> int:
@@ -123,6 +143,34 @@ def create_app(root: Path = JOBS) -> FastAPI:
         if not path:
             raise HTTPException(404, "No such job.")
         return path
+
+    @app.post("/api/jobs/{job_id}/revise", status_code=201)
+    def revise(job_id: str, revision: Revision):
+        job_path(job_id)
+        if not jobs.can_revise(job_id):
+            raise HTTPException(400, "Only a finished model can be revised.")
+        if revision.agent not in AGENTS or not AGENTS[revision.agent].available():
+            raise HTTPException(400, f"Agent not available: {revision.agent}")
+        if not revision.requests and not revision.general.strip():
+            raise HTTPException(400, "Say what to change.")
+        if revision.model and not re.fullmatch(r"[\w.\-:\[\]]{1,80}", revision.model):
+            raise HTTPException(400, "Invalid model name.")
+        view = None
+        if revision.view:
+            prefix = "data:image/png;base64,"
+            try:
+                if not revision.view.startswith(prefix):
+                    raise ValueError("not a PNG data URL")
+                view = base64.b64decode(revision.view[len(prefix):], validate=True)
+                if len(view) > MAX_UPLOAD:
+                    raise ValueError("too large")
+                with Image.open(io.BytesIO(view)) as probe:
+                    probe.verify()
+            except Exception as error:  # noqa: BLE001 - Pillow raises many types for bad files
+                raise HTTPException(400, "The view image is not readable.") from error
+        new_id = jobs.revise(job_id, requests=[r.model_dump() for r in revision.requests], general=revision.general.strip(),
+                             agent=revision.agent, model=revision.model or None, view=view)
+        return jobs.get(new_id)
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str):

@@ -21,6 +21,13 @@ const messages = {
         sizeNote: '写真の比率を優先したので、入力より小さくなりました: {items}。入力した寸法が正しいか確認してください。', 'axis.width_x': '幅', 'axis.depth_y': '奥行き', 'axis.height_z': '高さ',
         checkFailed: '写真との比率チェックが合格しないまま完成しました（重なり {overlap}）。写真と見比べて確認してください。', checkUnreliable: 'このメイン写真は背景が単色でないため、比率を自動で測れませんでした。塗りつぶしで対象を指定すると測れるようになります。', 
         elapsed: '{s} 秒',
+        'revise.open': '修正を加える', 'revise.title': 'モデルに修正を加える',
+        'revise.help': '直したい場所を色で塗り、色ごとに指示を書いてください。左ドラッグで塗る、右ドラッグで回転、ホイールでズームです。元のモデルは残ります。',
+        'revise.paint': '塗る', 'revise.view': '視点を動かす', 'revise.addColour': '色を追加',
+        'revise.colourPrompt': 'この色の部分をどう直しますか', 'revise.promptPlaceholder': '例: もっと長くしてください', 'revise.removeColour': 'この色を削除', 'revise.colourLabel': '色 {n} を選ぶ',
+        'revise.general': '全体への指示（任意）', 'revise.generalPlaceholder': '例: 全体を今の1.5倍の大きさにしてください',
+        'revise.submit': '修正開始', 'revise.needPrompt': '色 {n} は塗ってありますが、指示がありません', 'revise.needPaint': '色 {n} は指示がありますが、塗ってありません',
+        'revise.nothing': '色を塗って指示を書くか、全体への指示を入れてください', revision: '修正 {n}',
     },
     en: {
         tagline: 'An AI agent models a true-to-size GLB in Blender from a product photo and its dimensions', language: 'Language',
@@ -44,6 +51,13 @@ const messages = {
         sizeNote: 'The proportions in the photo took priority, so this came out smaller than you entered: {items}. Check the size you entered.', 'axis.width_x': 'width', 'axis.depth_y': 'depth', 'axis.height_z': 'height',
         checkFailed: "This finished without passing the check against the photo (overlap {overlap}). Compare it with the photo yourself.", checkUnreliable: "This main photo's background isn't plain, so its proportions couldn't be measured automatically. Painting the item makes that possible.", 
         elapsed: '{s} s',
+        'revise.open': 'Make changes', 'revise.title': 'Change the model',
+        'revise.help': 'Paint what you want changed, and write an instruction for each colour. Left-drag paints, right-drag rotates, and the wheel zooms. The original model is kept.',
+        'revise.paint': 'Paint', 'revise.view': 'Move the view', 'revise.addColour': 'Add colour',
+        'revise.colourPrompt': 'How should this colour change?', 'revise.promptPlaceholder': 'e.g. Make this longer', 'revise.removeColour': 'Remove this colour', 'revise.colourLabel': 'Choose colour {n}',
+        'revise.general': 'About the whole model (optional)', 'revise.generalPlaceholder': 'e.g. Make the whole thing 1.5 times as big',
+        'revise.submit': 'Start changes', 'revise.needPrompt': 'Colour {n} is painted but has no instruction', 'revise.needPaint': 'Colour {n} has an instruction but no paint',
+        'revise.nothing': 'Paint a colour and write an instruction, or add one about the whole model', revision: 'Revision {n}',
     },
 };
 

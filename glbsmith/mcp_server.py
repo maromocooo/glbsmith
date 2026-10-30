@@ -109,16 +109,17 @@ def measure() -> str:
 
 
 @mcp.tool()
-def render_views(views: list[str] | None = None, focus: str | None = None) -> list:
+def render_views(views: list[str] | None = None, focus: str | None = None, show_marks: bool = False) -> list:
     """Render the model next to the reference photo to compare them.
 
     views: any of front, right, back, left, top, bottom (orthographic, all at one scale) and angled.
     Default: front, right, top, angled. focus: an object name to zoom in on one part.
+    show_marks: when revising, also draw the person's paint (it stays where it was painted, even after edits).
     """
     state["renders"] += 1
     label = f"{state['renders']:03d}"
     try:
-        result = worker.call("render_views", views=views, focus=focus, label=label, timeout=600)
+        result = worker.call("render_views", views=views, focus=focus, label=label, show_marks=show_marks, timeout=600)
     except BlenderError as error:
         return [f"Error: {error}"]
     if "error" in result:
@@ -127,6 +128,53 @@ def render_views(views: list[str] | None = None, focus: str | None = None) -> li
     _sheet(result["views"], output, with_reference=not focus)
     event("render", path=str(output.relative_to(JOB)), number=state["renders"])
     return [f"Size now: {result['size_cm']} cm (X, Y, Z).", Image(path=str(output))]
+
+
+def _revision_pictures(requests: list[dict]) -> list:
+    """The paint on the model: an overview, then a close-up of each colour."""
+    content = []
+    state["renders"] += 1
+    label = f"{state['renders']:03d}"
+    overview = worker.call("render_views", label=label, show_marks=True, timeout=600)
+    path = JOB / "renders" / f"{label}_sheet.png"
+    _sheet(overview["views"], path, with_reference=False)
+    event("render", path=str(path.relative_to(JOB)), number=state["renders"])
+    content += ["The paint on the model, from all sides:", Image(path=str(path))]
+    for index, request in enumerate(requests, 1):
+        if not request.get("box"):
+            continue
+        state["renders"] += 1
+        label = f"{state['renders']:03d}"
+        closeup = worker.call("render_views", views=["front", "angled"], label=label, show_marks=True, focus_box=request["box"], timeout=600)
+        path = JOB / "renders" / f"{label}_sheet.png"
+        _sheet(closeup["views"], path, with_reference=False)
+        content += [f"Close-up of colour {index} ({request['color']}):", Image(path=str(path))]
+    return content
+
+
+@mcp.tool()
+def get_revision_requests() -> list:
+    """What the person wants changed: each painted colour with its instruction, and pictures of the paint."""
+    path = JOB / "revision.json"
+    if not path.exists():
+        return ["This job is not a revision."]
+    revision = json.loads(path.read_text())
+    try:
+        marks = worker.call("revision_marks")["requests"]
+        pictures = _revision_pictures(marks)
+    except BlenderError as error:
+        return [f"Error: {error}"]
+    lines = ["These are the person's own requests."]
+    if revision.get("general"):
+        lines.append(f"About the whole model: {revision['general']}")
+    for index, request in enumerate(marks, 1):
+        where = ", ".join(f"{p['name']} ({p['share']:.0%})" for p in request.get("parts", ())) or "nothing painted"
+        lines.append(f"Colour {index} ({request['color']}): {request['prompt']}\n"
+                     f"  Painted on: {where}. Painted area from {request.get('painted_from_cm')} to {request.get('painted_to_cm')} cm (X, Y, Z).")
+    content = ["\n".join(lines)]
+    if (JOB / "revision_view.png").exists():
+        content += ["What the person was looking at when they painted (the same colours):", Image(path=str(JOB / "revision_view.png"))]
+    return content + pictures
 
 
 @mcp.tool()
@@ -182,9 +230,10 @@ def bake_materials() -> str:
 def finalize() -> str:
     """Write the GLB. Needs a check_against_photo after your last edit, and a model that fits the box."""
     check = state["checked"]
-    if check is None:
+    revising = bool(BRIEF.get("revision"))  # the person may want something other than the photo
+    if check is None and not revising:
         return json.dumps({"ok": False, "reason": "Call check_against_photo for photo 1 first: the model changed since the last check."})
-    if check["verdict"] == "fail" and state["failed_checks"] < FAILED_CHECKS_ALLOWED:
+    if not revising and check["verdict"] == "fail" and state["failed_checks"] < FAILED_CHECKS_ALLOWED:
         return json.dumps({"ok": False, "reason": "The last check_against_photo of photo 1 failed. Fix the flagged bands and check again.",
                            "flagged_bands": check.get("flagged_bands")})
     try:
@@ -198,16 +247,14 @@ def finalize() -> str:
     written = bounds(JOB / "model.glb")
     size = written["size"]
     # The worker reports what it should have written, so compare the file with that. glTF: x, height, depth.
-    box = result["smaller_than_box"]
-    expected = [box["width_x"]["model_cm"] / 100 if "width_x" in box else BRIEF["width"] / 100,
-                box["height_z"]["model_cm"] / 100 if "height_z" in box else BRIEF["height"] / 100,
-                box["depth_y"]["model_cm"] / 100 if "depth_y" in box else BRIEF["depth"] / 100]
+    wanted = result["expected_cm"]
+    expected = [wanted["width_x"] / 100, wanted["height_z"] / 100, wanted["depth_y"] / 100]
     errors = [abs(size[i] / expected[i] - 1) for i in range(3)]
     result["glb_size_cm"] = {"width": round(size[0] * 100, 2), "height": round(size[1] * 100, 2), "depth": round(size[2] * 100, 2)}
     result["glb_base_y_m"] = round(written["min"][1], 5)
     result["glb_materials"] = written["materials"]
     result["glb_textures"] = written["textures"]
-    result["photo_check"] = {k: check.get(k) for k in ("verdict", "overlap", "view", "reason", "flagged_bands", "photo_width_per_height", "model_width_per_height")}
+    result["photo_check"] = check and {k: check.get(k) for k in ("verdict", "overlap", "view", "reason", "flagged_bands", "photo_width_per_height", "model_width_per_height")}
     if max(errors) > SIZE_TOLERANCE:
         result["ok"] = False
         result["reason"] = "The written file does not match the brief."

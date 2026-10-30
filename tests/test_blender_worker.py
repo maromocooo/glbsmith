@@ -180,3 +180,71 @@ def test_small_overshoot_on_one_axis_does_not_distort_the_others(worker, tmp_pat
     size = bounds(tmp_path / "model.glb")["size"]
     assert size[1] == pytest.approx(1.2, abs=1e-4)
     assert size[0] == pytest.approx(0.4 / 1.01, abs=1e-3)
+
+
+def revise_worker(worker, tmp_path, points):
+    """Finish a model, then reopen it the way a revision does, with paint given in GLB coordinates."""
+    blender = worker()
+    build(blender)  # stands at (0.3, 0.2) in the scene, so the GLB centring really moves it
+    finished = blender.call("finalize")
+    assert finished["ok"]
+    blender.stop()
+    (tmp_path / "revision.json").write_text(json.dumps({
+        "parent": "x", "general": "", "glb_size_cm": {"width": 40.0, "depth": 30.0, "height": 120.0},
+        "requests": [{"color": "#00ff00", "prompt": "longer", "points": points}],
+    }))
+    brief = json.loads((tmp_path / "brief.json").read_text())
+    (tmp_path / "brief.json").write_text(json.dumps({**brief, "revision": True}))
+    again = BlenderWorker(tmp_path)
+    again.start()
+    return again
+
+
+def test_paint_on_the_glb_lands_on_the_right_part_of_the_scene(worker, tmp_path):
+    # glTF is Y-up with the front on +Z: (0, 1.1, 0) is high on the post, (0, 0.02, 0.1) on the front of the base.
+    blender = revise_worker(worker, tmp_path, [[0, 1.1, 0, 0.01], [0, 1.0, 0, 0.01], [0, 0.9, 0, 0.01]])
+    try:
+        marks = json.loads((tmp_path / "marks.json").read_text())[0]["points"]
+        assert marks[0][:3] == pytest.approx([0.3, 0.2, 1.1], abs=1e-3)  # back in scene coordinates
+        requests = blender.call("revision_marks")["requests"]
+        assert requests[0]["parts"][0]["name"] == "post"
+        assert requests[0]["prompt"] == "longer"
+    finally:
+        blender.stop()
+
+
+def test_a_point_on_the_front_of_the_glb_maps_to_the_front_of_the_scene(worker, tmp_path):
+    blender = revise_worker(worker, tmp_path, [[0, 0.05, 0.14, 0.01]])
+    try:
+        mark = json.loads((tmp_path / "marks.json").read_text())[0]["points"][0]
+        assert mark[1] == pytest.approx(0.2 - 0.14, abs=1e-3)  # front is -Y in the scene
+    finally:
+        blender.stop()
+
+
+def test_a_revision_may_leave_the_box_and_is_written_as_built(worker, tmp_path):
+    blender = revise_worker(worker, tmp_path, [[0, 1.1, 0, 0.01]])
+    try:
+        assert blender.call("run_python", code="import bpy; o = bpy.data.objects['post']; o.scale.z *= 2")["error"] is None
+        result = blender.call("finalize")
+        assert result["ok"]
+        size = bounds(tmp_path / "model.glb")["size"]
+        assert size[1] > 1.6
+        assert result["smaller_than_box"] == {}
+        assert all(v == 0 for v in result["correction_percent"].values())
+    finally:
+        blender.stop()
+
+
+def test_marks_show_in_renders_and_leave_nothing_behind(worker, tmp_path):
+    blender = revise_worker(worker, tmp_path, [[0, 1.1, 0, 0.03]])
+    try:
+        rendered = blender.call("render_views", views=["front"], label="m", show_marks=True, timeout=300)
+        plain = blender.call("render_views", views=["front"], label="p", timeout=300)
+        marked = Image.open(rendered["views"][0]["path"]).convert("RGB")
+        bare = Image.open(plain["views"][0]["path"]).convert("RGB")
+        assert list(marked.getdata()) != list(bare.getdata())
+        assert sorted(p["name"] for p in blender.call("measure")["parts"]) == ["base", "front_marker", "post"]
+        assert blender.call("run_python", code="import bpy; print(len([m for m in bpy.data.materials if m.name.startswith('__glbsmith')]))")["output"].strip() == "0"
+    finally:
+        blender.stop()

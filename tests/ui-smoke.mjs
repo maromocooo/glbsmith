@@ -139,6 +139,70 @@ try {
     const saved = await page.evaluate(async () => (await (await fetch('/api/jobs')).json())[0].photos);
     assert.deepEqual(saved, [{ painted: false }, { painted: true }]);
 
+    // Changes: paint on the model in 3D, per colour, then start a revision.
+    await page.click('#reviseStart');
+    await page.waitForFunction(() => !document.getElementById('revise').hidden);
+    const viewerBox = await (await page.$('#viewer canvas')).boundingBox();
+    const middle = { x: viewerBox.x + viewerBox.width / 2, y: viewerBox.y + viewerBox.height / 2 };
+    const spots = id => page.evaluate(i => window.glbsmith.viewer.marks(i).length, id);
+    const stroke = async () => {
+        await page.mouse.move(middle.x, middle.y - 30);
+        await page.mouse.down();
+        for (let i = 0; i < 6; i++) {
+            await page.mouse.move(middle.x, middle.y - 30 + i * 12);
+            await new Promise(r => setTimeout(r, 60));
+        }
+        await page.mouse.up();
+    };
+    await page.click('#reviseSubmit');
+    assert.match(await page.$eval('#reviseError', el => el.textContent), /色を塗って/);
+    await stroke();
+    const painted = await spots(0);
+    assert.ok(painted > 6, 'a drag paints a connected line, not one spot per mouse event');
+    await step(page, '025-revising');
+    // Painted without an instruction is refused, in place.
+    await page.click('#reviseSubmit');
+    assert.match(await page.$eval('#reviseError', el => el.textContent), /色 1 は塗ってありますが/);
+    // Undo, and a second colour, and painting moves the camera for nobody.
+    const cameraBefore = await page.evaluate(() => window.glbsmith.viewer.camera.position.toArray());
+    await stroke();
+    assert.deepEqual(await page.evaluate(() => window.glbsmith.viewer.camera.position.toArray()), cameraBefore);
+    await page.click('#reviseUndo');
+    assert.equal(await spots(0), painted);
+    await page.click('#addColour');
+    assert.equal(await page.$$eval('#colours li', els => els.length), 2);
+    await page.mouse.move(middle.x + 4, middle.y + 80);
+    await page.mouse.down();
+    await new Promise(r => setTimeout(r, 80));
+    await page.mouse.up();
+    assert.ok(await spots(1) > 0, 'second colour');
+    const prompts = await page.$$('#colours textarea');
+    await prompts[0].type('上を長くして');
+    await prompts[1].type('ここはそのまま');
+    // The model can be chosen too: the list follows the agent, and "other" takes a typed name.
+    await page.waitForFunction(() => document.querySelector('#reviseModelSelect option[value=__other__]'));
+    if (await page.$eval('#reviseAgent', el => [...el.options].some(o => o.value === 'claude'))) {
+        await page.select('#reviseAgent', 'claude');
+        await page.waitForFunction(() => document.querySelector('#reviseModelSelect option[value=opus]'));
+        await page.select('#reviseAgent', 'fake');
+        await page.waitForFunction(() => !document.querySelector('#reviseModelSelect option[value=opus]'));
+    }
+    await page.select('#reviseModelSelect', '__other__');
+    assert.equal(await page.$eval('#reviseModelCustom', el => el.hidden), false);
+    await page.type('#reviseModel', 'my-model-1');
+    await page.click('#reviseSubmit');
+    await page.waitForFunction(() => document.getElementById('resultTitle').textContent.includes('修正 1'));
+    assert.equal(await page.evaluate(async () => (await (await fetch('/api/jobs')).json())[0].model), 'my-model-1');
+    await page.waitForFunction(() => document.getElementById('viewer').dataset.loaded === 'true', { timeout: 120000 });
+    assert.match(await page.$eval('#measure', el => el.textContent), /× 130\.5 cm/, 'the fake agent made it taller');
+    assert.equal(await page.$eval('#revise', el => el.hidden), true);
+    assert.equal(await page.$eval('#reviseStart', el => el.hidden), false);
+    assert.equal(await page.$eval('#history', el => el.children.length), 2);
+    await step(page, '027-revised');
+    // Leaving the paint mode gives the left button back to orbiting.
+    const left = await page.evaluate(() => window.glbsmith.viewer.controls.mouseButtons.LEFT);
+    assert.equal(left, 0);
+
     // How many at once: changing it reaches the server.
     await page.waitForSelector('#concurrency option');
     await page.select('#concurrency', '2');
@@ -151,7 +215,7 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('#photos li').length === 1);
     for (const [id, value] of [['width', '30'], ['depth', '20'], ['height', '90']]) await page.type(`#${id}`, value);
     await page.click('#submit');
-    await page.waitForFunction(() => document.querySelectorAll('#history li').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('#history li').length === 3);
     await page.waitForFunction(() => !document.getElementById('cancel').hidden, { timeout: 30000 }).catch(() => {});
     const cancel = await page.$('#cancel');
     if (await cancel.evaluate(el => !el.hidden)) {
@@ -166,7 +230,7 @@ try {
 
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => window.glbsmith);
-    assert.equal(await page.$eval('#history', el => el.children.length), 2);
+    assert.equal(await page.$eval('#history', el => el.children.length), 3);
     assert.deepEqual(errors, []);
     console.log('UI smoke test passed');
 } finally {

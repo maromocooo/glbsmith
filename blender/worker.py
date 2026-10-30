@@ -17,6 +17,7 @@ import sys
 import traceback
 from pathlib import Path
 
+import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
@@ -138,7 +139,38 @@ VIEWS = {
 ANGLED = Vector((-0.62, -0.72, 0.42)).normalized()
 
 
-def build_rig():
+def _hex_colour(text):
+    value = text.lstrip("#")
+    return tuple((int(value[i:i + 2], 16) / 255) ** 2.2 for i in (0, 2, 4))
+
+
+def add_marks(collection):
+    """The person's paint as glowing dots in the render. Returns what to delete afterwards."""
+    created = []
+    for index, request in enumerate(load_marks()):
+        if not request["points"]:
+            continue
+        builder = bmesh.new()
+        for x, y, z, radius in request["points"]:
+            bmesh.ops.create_icosphere(builder, subdivisions=1, radius=radius, matrix=Matrix.Translation((x, y, z)))
+        mesh = bpy.data.meshes.new(f"{RIG}mark{index}")
+        builder.to_mesh(mesh)
+        builder.free()
+        material = bpy.data.materials.new(f"{RIG}mark{index}")
+        material.use_nodes = True
+        nodes = material.node_tree.nodes
+        nodes.clear()
+        emission = nodes.new("ShaderNodeEmission")
+        emission.inputs["Color"].default_value = (*_hex_colour(request["color"]), 1)
+        emission.inputs["Strength"].default_value = 1.0
+        material.node_tree.links.new(emission.outputs[0], nodes.new("ShaderNodeOutputMaterial").inputs[0])
+        mesh.materials.append(material)
+        collection.objects.link(bpy.data.objects.new(f"{RIG}mark{index}", mesh))
+        created.append((mesh, material))
+    return created
+
+
+def build_rig(show_marks=False):
     scene = bpy.context.scene
     collection = bpy.data.collections.new(RIG)
     scene.collection.children.link(collection)
@@ -163,6 +195,7 @@ def build_rig():
     camera = bpy.data.cameras.new(f"{RIG}camera")
     camera_object = add("camera", camera)
     scene.camera = camera_object
+    marks = add_marks(collection) if show_marks else []
 
     def remove():
         scene.world = saved_world
@@ -174,6 +207,9 @@ def build_rig():
                 bpy.data.lights.remove(data)
             elif isinstance(data, bpy.types.Camera):
                 bpy.data.cameras.remove(data)
+        for mesh, material in marks:
+            bpy.data.meshes.remove(mesh)
+            bpy.data.materials.remove(material)
         bpy.data.collections.remove(collection)
         bpy.data.worlds.remove(world)
 
@@ -188,7 +224,7 @@ def limit_threads(scene):
         scene.render.threads = threads
 
 
-def cmd_render_views(views=None, focus=None, label="render"):
+def cmd_render_views(views=None, focus=None, label="render", show_marks=False, focus_box=None):
     """Render fixed views to PNGs. Orthographic views share one scale so proportions can be compared."""
     views = views or ["front", "right", "top", "angled"]
     unknown = [v for v in views if v != "angled" and v not in VIEWS]
@@ -202,6 +238,8 @@ def cmd_render_views(views=None, focus=None, label="render"):
         if not matching:
             return {"error": f"No visible object named {focus!r}."}
         low, high = matching[0][1]
+    if focus_box:
+        low, high = Vector(focus_box[0]), Vector(focus_box[1])
     centre = (low + high) / 2
     size = high - low
     extent = max(size.x, size.y, size.z, 0.01)
@@ -220,7 +258,7 @@ def cmd_render_views(views=None, focus=None, label="render"):
     render.film_transparent = False
     render.image_settings.file_format = "PNG"
 
-    camera_object, camera, remove = build_rig()
+    camera_object, camera, remove = build_rig(show_marks)
     results = []
     try:
         (JOB / "renders").mkdir(exist_ok=True)
@@ -366,6 +404,72 @@ def cmd_bake_materials(size=1024):
     return {"baked": baked, "still_procedural": _procedural_materials()}
 
 
+# ---- revisions ----
+MARKS = JOB / "marks.json"
+
+
+def load_marks():
+    return json.loads(MARKS.read_text()) if MARKS.exists() else []
+
+
+def prepare_marks():
+    """Put the person's paint into this scene's coordinates, once, before anything is edited.
+
+    The paint was done on the GLB, which finalize centred on its base, in glTF axes,
+    and may have scaled by up to 2%. The saved scene still has the original position.
+    """
+    source = JOB / "revision.json"
+    if MARKS.exists() or not source.exists():
+        return
+    revision = json.loads(source.read_text())
+    low, high, _ = scene_bounds()
+    size = high - low
+    glb = revision["glb_size_cm"]
+    scale = [glb["width"] / 100 / size.x, glb["depth"] / 100 / size.y, glb["height"] / 100 / size.z]
+    centre = (low + high) / 2
+    requests = []
+    for request in revision["requests"]:
+        points = [[x / scale[0] + centre.x, -z / scale[1] + centre.y, y / scale[2] + low.z, radius]
+                  for x, y, z, radius in request["points"]]
+        requests.append({"color": request["color"], "prompt": request["prompt"], "points": points})
+    MARKS.write_text(json.dumps(requests))
+
+
+def cmd_revision_marks():
+    """Where each colour was painted, and which parts it landed on."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    objects = []
+    for obj in model_objects():
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        vertices = np.empty(len(mesh.vertices) * 3, dtype=np.float64)
+        mesh.vertices.foreach_get("co", vertices)
+        matrix = np.array(evaluated.matrix_world)
+        evaluated.to_mesh_clear()
+        if len(vertices):
+            objects.append((obj.name, vertices.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]))
+    results = []
+    for request in load_marks():
+        points = np.array(request["points"], dtype=np.float64).reshape(-1, 4)
+        entry = {"color": request["color"], "prompt": request["prompt"], "painted_spots": len(points)}
+        if len(points):
+            sample = points[np.linspace(0, len(points) - 1, min(len(points), 60)).astype(int), :3]
+            nearest = {}
+            for point in sample:
+                name = min(objects, key=lambda o: np.min(np.sum((o[1] - point) ** 2, axis=1)))[0]
+                nearest[name] = nearest.get(name, 0) + 1
+            low, high = points[:, :3].min(axis=0), points[:, :3].max(axis=0)
+            reach = points[:, 3].max()
+            entry.update({
+                "painted_from_cm": cm(low), "painted_to_cm": cm(high),
+                "box": [(low - reach * 3).tolist(), (high + reach * 3).tolist()],
+                "parts": [{"name": name, "share": round(count / len(sample), 2)}
+                          for name, count in sorted(nearest.items(), key=lambda item: -item[1])],
+            })
+        results.append(entry)
+    return {"requests": results}
+
+
 def cmd_finalize():
     low, high, parts = scene_bounds()
     if low is None:
@@ -378,7 +482,9 @@ def cmd_finalize():
     percent = {a: round((ratios[i] - 1) * 100, 2) for i, a in enumerate(axes)}
     # The given size is the box the item must fit in. It has to touch the box on
     # at least one axis, which fixes its scale; the photo decides the rest.
-    largest = max(ratios)
+    # A revision follows the person's instructions instead, and is written as built.
+    revision = bool(BRIEF.get("revision"))
+    largest = 1.0 if revision else max(ratios)
     if largest > 1 + TOLERANCE:
         return {"ok": False, "reason": f"The model is more than {TOLERANCE:.0%} bigger than the box it must fit in. "
                                        "Scale the whole model down so its proportions stay as they are.",
@@ -391,7 +497,7 @@ def cmd_finalize():
     # Axes that nearly touch the box snap to it exactly; the rest follow the
     # scale of the largest axis, so a small correction never changes proportions.
     uniform = 1 / largest
-    scales = [1 / ratios[i] if abs(ratios[i] - 1) <= TOLERANCE else uniform for i in range(3)]
+    scales = [1.0] * 3 if revision else [1 / ratios[i] if abs(ratios[i] - 1) <= TOLERANCE else uniform for i in range(3)]
 
     # Bake every part into flat world-space meshes: exact size, no shear from
     # scaling rotated children, origin at the centre of the base.
@@ -442,15 +548,17 @@ def cmd_finalize():
         "path": str(output),
         "measured_before_correction_cm": measured,
         "correction_percent": {a: round((scales[i] - 1) * 100, 2) for i, a in enumerate(axes)},
-        "smaller_than_box": {a: {"box_cm": target[a], "model_cm": round(size[i] * scales[i] * 100, 1)}
-                             for i, a in enumerate(axes) if ratios[i] * scales[i] < 1 - TOLERANCE},
+        "smaller_than_box": {} if revision else {a: {"box_cm": target[a], "model_cm": round(size[i] * scales[i] * 100, 1)}
+                                                 for i, a in enumerate(axes) if ratios[i] * scales[i] < 1 - TOLERANCE},
+        "expected_cm": {a: round(size[i] * scales[i] * 100, 3) for i, a in enumerate(axes)},
         "faces": sum(p[3] for p in parts),
         "parts": len(parts),
         "flat_materials_warning": _procedural_materials(),
     }
 
 
-COMMANDS = {"run_python": cmd_run_python, "measure": cmd_measure, "render_views": cmd_render_views, "bake_materials": cmd_bake_materials, "export_triangles": cmd_export_triangles, "finalize": cmd_finalize}
+COMMANDS = {"run_python": cmd_run_python, "measure": cmd_measure, "render_views": cmd_render_views, "bake_materials": cmd_bake_materials, "export_triangles": cmd_export_triangles,
+            "revision_marks": cmd_revision_marks, "finalize": cmd_finalize}
 
 
 def save():
@@ -476,6 +584,7 @@ def main() -> None:
     bpy.context.scene.unit_settings.scale_length = 1.0
 
     state = lock_down()
+    prepare_marks()
     reply({"ready": True, **state, "blender": bpy.app.version_string})
 
     for line in sys.stdin:

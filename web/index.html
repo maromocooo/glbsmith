@@ -60,6 +60,7 @@
             </div>
             <div class="actions">
                 <button type="button" id="cancel" data-i18n="cancel" hidden></button>
+                <button type="button" id="reviseStart" data-i18n="revise.open" hidden></button>
                 <a class="button primary" id="download" data-i18n="download" hidden></a>
             </div>
         </div>
@@ -72,6 +73,30 @@
                 <p class="measure" id="measure"></p>
             </figure>
         </div>
+        <section class="revise" id="revise" hidden>
+            <h3 data-i18n="revise.title"></h3>
+            <p class="note" data-i18n="revise.help"></p>
+            <div class="paint-tools" role="toolbar">
+                <button type="button" data-revise-tool="paint" data-i18n="revise.paint"></button>
+                <button type="button" data-revise-tool="erase" data-i18n="paint.eraser"></button>
+                <button type="button" data-revise-tool="view" data-i18n="revise.view"></button>
+                <label class="brush-size"><span data-i18n="paint.size"></span> <input type="range" id="reviseBrush" min="1" max="100" value="25"></label>
+                <button type="button" id="reviseUndo" data-i18n="paint.undo"></button>
+            </div>
+            <ol class="colours" id="colours"></ol>
+            <button type="button" id="addColour" data-i18n="revise.addColour"></button>
+            <label class="field"><span data-i18n="revise.general"></span>
+                <textarea id="reviseGeneral" rows="2" maxlength="4000" data-i18n-placeholder="revise.generalPlaceholder"></textarea></label>
+            <label class="field"><span data-i18n="agent"></span><select id="reviseAgent"></select></label>
+            <label class="field"><span data-i18n="model"></span><select id="reviseModelSelect"></select></label>
+            <label class="field" id="reviseModelCustom" hidden><span data-i18n="modelName"></span>
+                <input type="text" id="reviseModel" maxlength="80"></label>
+            <p class="note error" id="reviseError" role="alert" hidden></p>
+            <div class="paint-actions">
+                <button type="button" id="reviseCancel" data-i18n="paint.cancel"></button>
+                <button type="button" class="primary" id="reviseSubmit" data-i18n="revise.submit"></button>
+            </div>
+        </section>
         <p class="note warn" id="sizeNote" hidden></p>
         <p class="note warn" id="checkNote" hidden></p>
         <p class="message" id="message"></p>

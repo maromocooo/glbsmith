@@ -35,6 +35,14 @@ You can also run a job from the command line:
 uv run python -m glbsmith.run photo.png [more.png ...] --width 35 --depth 35 --height 155 --agent claude
 ```
 
+## Making changes
+
+When a model is close but not right, press **Make changes** on the result. Paint on the model in 3D with up to five colours, write an instruction for each ("make this longer", "add a peg here so it fits into the desk"), and press **Start changes**. You can also add an instruction about the whole model.
+
+The agent reopens the same Blender scene and is told to change only what was asked. It gets the paint as exact positions, the parts it landed on, and pictures of it. The result is a new entry in the history, and the original stays as it was, so you can go back or try something else.
+
+A revision follows your instructions rather than the original size and photo: parts may go beyond the original box, and the check against the photo is optional. The file is written at the size it was built.
+
 ## What the GLB guarantees
 
 The size you enter is the **box the item must fit in**, and the photo decides the proportions. `finalize` measures the model itself rather than trusting the agent:
@@ -60,7 +68,7 @@ Browser ──> FastAPI (localhost) ──> claude -p / codex exec
                                     glbsmith.mcp_server ──> blender --background
 ```
 
-The agent gets seven tools and nothing else: `get_brief`, `run_python`, `render_views`, `measure`, `check_against_photo`, `bake_materials` and `finalize`. See [prompts/modeler.md](prompts/modeler.md) for its instructions.
+The agent gets eight tools and nothing else: `get_brief`, `get_revision_requests`, `run_python`, `render_views`, `measure`, `check_against_photo`, `bake_materials` and `finalize`. See [prompts/modeler.md](prompts/modeler.md) and [prompts/reviser.md](prompts/reviser.md) for its instructions.
 
 ## Security and privacy
 
@@ -70,7 +78,7 @@ The agent gets seven tools and nothing else: `get_brief`, `run_python`, `render_
 - If Landlock is not available, the app says so and asks for your explicit consent before running.
 - The agents run without shell or file tools, and without your settings, hooks or other MCP servers.
 - The server binds to localhost and refuses other sites and hostnames. It has no authentication, so do not expose it to a network.
-- The photo is sent to the service of the agent you choose. EXIF data such as GPS position is removed first.
+- The photos are sent to the service of the agent you choose. EXIF data such as GPS position is removed first. Painting fades the rest of a photo but does not remove it, so anything in the frame still goes along. Crop out what should not be sent.
 - `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are removed from the agent's environment, so a job cannot silently switch to pay-per-use billing.
 
 ## Images and licences

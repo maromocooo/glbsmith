@@ -2,8 +2,10 @@
 
 import json
 import os
+import shutil
 import signal
 import threading
+import uuid
 from collections import deque
 from pathlib import Path
 
@@ -91,12 +93,45 @@ class Jobs:
             self._changed.notify_all()
         return job.name
 
+    def revise(self, parent_id: str, *, requests: list[dict], general: str, agent: str, model: str | None, view: bytes | None) -> str:
+        """A new job that continues from a finished model. The original stays as it was."""
+        parent = self.root / parent_id
+        report = json.loads((parent / "report.json").read_text())
+        state = self._read(parent) or {}
+        job = self.root / uuid.uuid4().hex[:12]
+        job.mkdir()
+        brief = json.loads((parent / "brief.json").read_text())
+        brief.pop("render_threads", None)
+        photos = runner.brief_images(brief)
+        for photo in photos:
+            for key in ("file", "mask", "view"):
+                if photo[key] and not (job / photo[key]).exists():
+                    shutil.copyfile(parent / photo[key], job / photo[key])
+        shutil.copyfile(parent / "model.blend", job / "model.blend")
+        (job / "revision.json").write_text(json.dumps({
+            "parent": parent_id, "requests": requests, "general": general, "glb_size_cm": report["glb_size_cm"],
+        }))
+        if view:
+            (job / "revision_view.png").write_bytes(view)
+        (job / "brief.json").write_text(json.dumps({**brief, "images": photos, "revision": True}))
+        with self._changed:
+            self._write(job.name, {"status": "queued", "agent": agent, "model": model, "revision_of": parent_id,
+                                   "revision_number": state.get("revision_number", 0) + 1})
+            self.queue.append(job.name)
+            self._changed.notify_all()
+        return job.name
+
+    def can_revise(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        path = self.root / job_id
+        return bool(job and job["has_model"] and (path / "model.blend").exists() and (path / "report.json").exists())
+
     def cancel(self, job_id: str) -> bool:
         with self._changed:
             state = self._read(self.root / job_id)
             if not state or state["status"] not in ("queued", "running"):
                 return False
-            self._write(job_id, {"status": "cancelled", "agent": state.get("agent"), "model": state.get("model")})
+            self._write(job_id, {**state, "status": "cancelled"})
             if job_id in self.queue:
                 self.queue.remove(job_id)
             self._kill(self.running.get(job_id))

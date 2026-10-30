@@ -1,5 +1,6 @@
 """The web API with the fake agent and real Blender. Uses no agent quota."""
 
+import base64
 import io
 import json
 import os
@@ -205,6 +206,62 @@ def test_cancel_a_queued_job_never_starts_it(client, monkeypatch):
     assert client.post(f"/api/jobs/{second}/cancel").json()["cancelled"]
     assert wait(client, first, {"done", "failed"})["status"] == "done"
     assert client.get(f"/api/jobs/{second}").json()["status"] == "cancelled"
+
+
+def request_for(point, color="#ff0000", prompt="make this taller"):
+    return {"color": color, "prompt": prompt, "points": [[*point, 0.02]]}
+
+
+def finished_job(client):
+    return wait(client, submit(client).json()["id"], {"done", "failed"})
+
+
+def test_revision_makes_a_new_job_and_leaves_the_original_alone(client, tmp_path):
+    parent = finished_job(client)
+    original = (tmp_path / parent["id"] / "model.glb").read_bytes()
+    view = base64.b64encode(photo()).decode()
+    response = client.post(f"/api/jobs/{parent['id']}/revise", json={
+        "requests": [request_for((0, 0.8, 0))], "general": "keep the base", "agent": "fake", "view": f"data:image/png;base64,{view}",
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["revision_of"] == parent["id"] and response.json()["revision_number"] == 1
+    child = wait(client, response.json()["id"], {"done", "failed"})
+    assert child["status"] == "done", child
+    # Grew past the original 90 cm box, which a revision may do.
+    assert child["report"]["glb_size_cm"]["height"] == pytest.approx(130.5, abs=0.5)
+    assert child["report"]["photo_check"] is None
+    assert (tmp_path / parent["id"] / "model.glb").read_bytes() == original
+    assert (tmp_path / child["id"] / "revision_view.png").exists()
+    # The revision itself can be revised.
+    second = client.post(f"/api/jobs/{child['id']}/revise", json={"general": "again", "agent": "fake"}).json()
+    assert second["revision_number"] == 2
+    assert wait(client, second["id"], {"done", "failed"})["status"] == "done"
+
+
+@pytest.mark.parametrize("change", [
+    {"requests": [], "general": "  "},
+    {"agent": "nope"},
+    {"model": "x; rm -rf /"},
+    {"view": "data:text/html;base64,AAAA"},
+    {"view": "data:image/png;base64,AAAA"},
+    {"requests": [request_for((0, 0, 0), color="red")]},
+    {"requests": [request_for((0, 0, 0), prompt="")]},
+    {"requests": [{"color": "#ff0000", "prompt": "x", "points": []}]},
+    {"requests": [request_for((0, 0, 0))] * 6},
+    {"requests": [{"color": "#ff0000", "prompt": "x", "points": [[0, 0, 0, 0.01]] * 4001}]},
+])
+def test_bad_revisions_are_refused(client, change):
+    parent = finished_job(client)
+    body = {"requests": [request_for((0, 0, 0))], "agent": "fake", **change}
+    assert client.post(f"/api/jobs/{parent['id']}/revise", json=body).status_code in (400, 422)
+
+
+def test_only_a_finished_model_can_be_revised(client, monkeypatch):
+    monkeypatch.setenv("GLBSMITH_FAKE_PAUSE", "1")
+    running = submit(client).json()["id"]
+    assert client.post(f"/api/jobs/{running}/revise", json={"general": "x", "agent": "fake"}).status_code == 400
+    assert client.post("/api/jobs/nothere/revise", json={"general": "x", "agent": "fake"}).status_code == 404
+    wait(client, running, {"done", "failed"})
 
 
 def test_not_an_image_is_refused(client):
