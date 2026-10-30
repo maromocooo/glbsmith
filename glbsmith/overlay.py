@@ -27,41 +27,71 @@ PASS_OVERLAP = 0.6
 PANEL_MIN_WIDTH = 270
 
 
-def photo_mask(image: Image.Image, side: int = MASK_SIDE) -> tuple[np.ndarray | None, Image.Image, str | None]:
-    """(foreground mask, resized RGB photo, reason it could not be trusted)."""
+def _background_mask(rgba: np.ndarray) -> np.ndarray | None:
+    """What is not plain background, or None if the background is not plain."""
+    rgb = rgba[..., :3]
+    border = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
+    background = np.median(border, axis=0)
+    close = np.abs(rgb - background).max(axis=-1) <= BACKGROUND_TOLERANCE
+    if (np.abs(border - background).max(axis=-1) <= BACKGROUND_TOLERANCE * 2).mean() < 0.6:
+        return None
+    # Background is what the border can reach; anything enclosed by the item stays in the item.
+    reached = np.zeros_like(close)
+    reached[0], reached[-1], reached[:, 0], reached[:, -1] = close[0], close[-1], close[:, 0], close[:, -1]
+    while True:
+        grown = reached.copy()
+        grown[1:] |= reached[:-1]
+        grown[:-1] |= reached[1:]
+        grown[:, 1:] |= reached[:, :-1]
+        grown[:, :-1] |= reached[:, 1:]
+        grown &= close
+        if (grown == reached).all():
+            return ~reached
+        reached = grown
+
+
+def photo_mask(image: Image.Image, side: int = MASK_SIDE, painted: Image.Image | None = None) -> tuple[np.ndarray | None, Image.Image, str | None]:
+    """(foreground mask, resized RGB photo, reason it could not be trusted).
+
+    `painted` is the area a person marked as the item. It wins over everything else,
+    except that on a plain background a rough brush stroke is trimmed to the item's edge.
+    """
     image = image.convert("RGBA")
     image.thumbnail((side, side))
     rgba = np.asarray(image, dtype=np.int16)
     photo = Image.new("RGB", image.size, (255, 255, 255))
     photo.paste(image, mask=image.getchannel("A"))
-    if (rgba[..., 3] < 250).mean() > 0.02:
+    has_alpha = (rgba[..., 3] < 250).mean() > 0.02
+    if painted is not None:
+        mask = np.asarray(painted.convert("L").resize(image.size, Image.NEAREST)) > 127
+        detected = rgba[..., 3] > 32 if has_alpha else _background_mask(rgba)
+        if detected is not None and (mask & detected).sum() >= mask.sum() * 0.05:
+            mask = mask & detected
+        if mask.mean() < 0.002:
+            return None, photo, "The painted area is too small to measure."
+        return mask, highlight(photo, mask), None
+    if has_alpha:
         mask = rgba[..., 3] > 32
     else:
-        rgb = rgba[..., :3]
-        border = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
-        background = np.median(border, axis=0)
-        close = np.abs(rgb - background).max(axis=-1) <= BACKGROUND_TOLERANCE
-        if np.abs(border - background).max(axis=-1).__le__(BACKGROUND_TOLERANCE * 2).mean() < 0.6:
-            return None, photo, "The photo's background is not plain, so its outline cannot be measured."
-        # Background is what the border can reach; anything enclosed by the item stays in the item.
-        reached = np.zeros_like(close)
-        reached[0], reached[-1], reached[:, 0], reached[:, -1] = close[0], close[-1], close[:, 0], close[:, -1]
-        while True:
-            grown = reached.copy()
-            grown[1:] |= reached[:-1]
-            grown[:-1] |= reached[1:]
-            grown[:, 1:] |= reached[:, :-1]
-            grown[:, :-1] |= reached[:, 1:]
-            grown &= close
-            if (grown == reached).all():
-                break
-            reached = grown
-        mask = ~reached
+        mask = _background_mask(rgba)
+        if mask is None:
+            return None, photo, "The photo's background is not plain, so its outline cannot be measured. Painting the item would fix this."
     mask = _main_parts(mask)
     share = mask.mean()
     if share < 0.005 or share > 0.9:
         return None, photo, "The item could not be separated from the photo's background."
     return mask, photo, None
+
+
+def highlight(image: Image.Image, mask: np.ndarray) -> Image.Image:
+    """The item as it is, with everything else faded and a line around it."""
+    rgb = image.convert("RGB")
+    pixels = np.asarray(rgb, dtype=np.float32)
+    faded = pixels.mean(axis=-1, keepdims=True) * 0.25 + 255 * 0.75
+    out = np.where(mask[..., None], pixels, faded).astype(np.uint8)
+    wide = np.asarray(Image.fromarray(mask.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(5))) > 0
+    out[wide & ~mask] = (230, 0, 150)
+    return Image.fromarray(out)
 
 
 def _main_parts(mask: np.ndarray) -> np.ndarray:
@@ -204,9 +234,9 @@ def _extents(mask: np.ndarray, top: int, bottom: int) -> list[tuple[float, int]]
 
 
 def compare(triangles: np.ndarray, colours: np.ndarray, parts: np.ndarray, names: list[str], photo_image: Image.Image,
-            *, azimuth: float | None = None, elevation: float | None = None) -> tuple[dict, Image.Image]:
-    """(numbers for the agent, picture of the overlay). `height_cm` of the model comes from its own geometry."""
-    mask, photo, problem = photo_mask(photo_image)
+            *, azimuth: float | None = None, elevation: float | None = None, painted: Image.Image | None = None) -> tuple[dict, Image.Image]:
+    """(numbers for the agent, picture of the overlay). `painted` marks the item in a busy photo."""
+    mask, photo, problem = photo_mask(photo_image, painted=painted)
     if mask is None:
         view = View(azimuth or 0.0, elevation or 0.0)
         return {"verdict": "unreliable", "reason": problem}, _picture(triangles, colours, view, None, photo, None)

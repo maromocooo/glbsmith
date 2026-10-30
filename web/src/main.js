@@ -1,9 +1,9 @@
 import { apply, getLanguage, setLanguage, t } from './i18n.js';
+import { paintMask } from './paint.js';
 import { Viewer } from './viewer.js';
 
 const $ = id => document.getElementById(id);
 const viewer = new Viewer($('viewer'));
-let photo = null;
 let status = null;
 let currentId = null;
 let source = null;
@@ -15,23 +15,68 @@ async function api(path, options) {
     return body;
 }
 
-// ---- form ----
-function setPhoto(file) {
-    if (!file?.type.startsWith('image/')) return;
-    photo = file;
-    $('preview').src = URL.createObjectURL(file);
-    $('preview').hidden = false;
-    $('dropHint').hidden = true;
+// ---- form: photos, the first is the main one ----
+const MAX_PHOTOS = 8;
+let photos = []; // { file, url, mask: Blob | null }
+
+function addPhotos(files) {
+    const images = [...files].filter(file => file.type.startsWith('image/'));
+    const room = MAX_PHOTOS - photos.length;
+    if (images.length > room) showError(t('tooManyPhotos', { n: MAX_PHOTOS }));
+    for (const file of images.slice(0, room)) photos.push({ file, url: URL.createObjectURL(file), mask: null });
+    renderPhotos();
 }
-$('image').addEventListener('change', e => setPhoto(e.target.files[0]));
+
+function renderPhotos() {
+    const smallButton = (key, onClick) => {
+        const button = Object.assign(document.createElement('button'), { type: 'button', className: 'small', textContent: t(key) });
+        button.addEventListener('click', onClick);
+        return button;
+    };
+    $('photos').replaceChildren(...photos.map((photo, index) => {
+        const item = document.createElement('li');
+        const thumb = Object.assign(document.createElement('span'), { className: 'thumb' });
+        thumb.append(Object.assign(document.createElement('img'), { src: photo.url, alt: photo.file.name }));
+        if (photo.mask) {
+            const preview = document.createElement('canvas');
+            preview.dataset.painted = 'true';
+            createImageBitmap(photo.mask).then(bitmap => {
+                preview.width = bitmap.width;
+                preview.height = bitmap.height;
+                preview.getContext('2d').drawImage(bitmap, 0, 0);
+            });
+            thumb.append(preview);
+        }
+        if (index === 0) thumb.append(Object.assign(document.createElement('span'), { className: 'main-badge', textContent: t('mainPhoto') }));
+        const remove = Object.assign(document.createElement('button'), { type: 'button', className: 'remove', textContent: '×' });
+        remove.setAttribute('aria-label', t('removePhoto'));
+        remove.addEventListener('click', () => {
+            URL.revokeObjectURL(photo.url);
+            photos.splice(photos.indexOf(photo), 1);
+            renderPhotos();
+        });
+        thumb.append(remove);
+        item.append(thumb);
+        item.append(smallButton(photo.mask ? 'paintAgain' : 'paintButton', async () => {
+            const mask = await paintMask(photo.url, photo.mask);
+            if (mask !== undefined) { photo.mask = mask; renderPhotos(); }
+        }));
+        if (index > 0) item.append(smallButton('makeMain', () => { photos.splice(index, 1); photos.unshift(photo); renderPhotos(); }));
+        return item;
+    }));
+}
+
+function showError(text) {
+    $('formError').textContent = text;
+    $('formError').hidden = false;
+}
+
+$('image').addEventListener('change', e => { addPhotos(e.target.files); e.target.value = ''; });
 $('dropzone').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('image').click(); } });
 for (const type of ['dragenter', 'dragover']) $('dropzone').addEventListener(type, e => { e.preventDefault(); $('dropzone').classList.add('over'); });
 for (const type of ['dragleave', 'drop']) $('dropzone').addEventListener(type, e => { e.preventDefault(); $('dropzone').classList.remove('over'); });
-$('dropzone').addEventListener('drop', e => setPhoto(e.dataTransfer.files[0]));
-addEventListener('paste', e => {
-    const file = [...e.clipboardData.files].find(f => f.type.startsWith('image/'));
-    if (file) setPhoto(file);
-});
+$('dropzone').addEventListener('drop', e => addPhotos(e.dataTransfer.files));
+addEventListener('paste', e => addPhotos(e.clipboardData.files));
 
 // ---- model choice: what each agent's CLI says is available ----
 const OTHER = '__other__';
@@ -86,13 +131,15 @@ function renderAgents() {
 
 $('form').addEventListener('submit', async e => {
     e.preventDefault();
-    const error = $('formError');
-    error.hidden = true;
+    $('formError').hidden = true;
     const agent = document.querySelector('input[name=agent]:checked')?.value;
-    const problem = !photo ? t('pickImage') : !agent ? t('pickAgent') : null;
-    if (problem) { error.textContent = problem; error.hidden = false; return; }
+    const problem = !photos.length ? t('pickImage') : !agent ? t('pickAgent') : null;
+    if (problem) { showError(problem); return; }
     const form = new FormData();
-    form.set('image', photo);
+    for (const photo of photos) {
+        form.append('images', photo.file);
+        form.append('masks', photo.mask ?? new Blob([]), 'mask.png');
+    }
     for (const id of ['width', 'depth', 'height', 'name']) form.set(id, $(id).value);
     form.set('model', $('modelSelect').value === OTHER ? $('model').value.trim() : $('modelSelect').value);
     form.set('agent', agent);
@@ -100,11 +147,15 @@ $('form').addEventListener('submit', async e => {
     $('submit').disabled = true;
     try {
         const job = await api('/api/jobs', { method: 'POST', body: form });
+        // Ready for the next item straight away; this one carries on in the queue.
+        for (const photo of photos) URL.revokeObjectURL(photo.url);
+        photos = [];
+        renderPhotos();
+        for (const id of ['width', 'depth', 'height', 'name']) $(id).value = '';
         await refreshHistory();
         show(job.id);
     } catch (failure) {
-        error.textContent = failure.message;
-        error.hidden = false;
+        showError(failure.message);
     } finally {
         $('submit').disabled = false;
     }
@@ -115,7 +166,27 @@ let history = [];
 async function refreshHistory() {
     history = await api('/api/jobs');
     renderHistory();
+    renderLoad(await api('/api/settings'));
 }
+
+// ---- how many at once ----
+function renderLoad(settings) {
+    const select = $('concurrency');
+    if (select.options.length !== settings.max) {
+        select.replaceChildren(...Array.from({ length: settings.max }, (_, i) => Object.assign(document.createElement('option'), { value: i + 1 })));
+    }
+    for (const option of select.options) option.textContent = t('concurrencyOption', { n: option.value });
+    select.value = settings.concurrency;
+    $('load').textContent = t('load', settings);
+}
+$('concurrency').addEventListener('change', async e => renderLoad(await api('/api/settings', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ concurrency: Number(e.target.value) }),
+})));
+
+// Other jobs finish in the background while one is on screen.
+setInterval(() => {
+    if (!document.hidden && history.some(job => job.status === 'queued' || job.status === 'running')) refreshHistory();
+}, 3000);
 function renderHistory() {
     const list = $('history');
     if (!history.length) {
@@ -131,7 +202,7 @@ function renderHistory() {
         button.type = 'button';
         button.setAttribute('aria-current', String(job.id === currentId));
         button.addEventListener('click', () => show(job.id));
-        const image = Object.assign(document.createElement('img'), { src: `/api/jobs/${job.id}/reference`, alt: '', loading: 'lazy' });
+        const image = Object.assign(document.createElement('img'), { src: `/api/jobs/${job.id}/reference/0`, alt: '', loading: 'lazy' });
         const text = document.createElement('span');
         text.textContent = job.brief.name || t('untitled');
         const detail = document.createElement('small');
@@ -224,6 +295,20 @@ async function renderState(job) {
     await refreshHistory();
 }
 
+function showReferences(id, count) {
+    const pick = number => {
+        $('reference').src = `/api/jobs/${id}/reference/${number}`;
+        for (const [i, button] of [...$('referenceStrip').children].entries()) button.setAttribute('aria-current', String(i === number));
+    };
+    $('referenceStrip').replaceChildren(...(count < 2 ? [] : Array.from({ length: count }, (_, number) => {
+        const button = Object.assign(document.createElement('button'), { type: 'button' });
+        button.append(Object.assign(document.createElement('img'), { src: `/api/jobs/${id}/reference/${number}`, alt: '' }));
+        button.addEventListener('click', () => pick(number));
+        return button;
+    })));
+    pick(0);
+}
+
 function show(id) {
     currentId = id;
     source?.close();
@@ -239,8 +324,8 @@ function show(id) {
     $('rendersTitle').hidden = true;
     $('log').replaceChildren();
     delete $('viewer').dataset.loaded;
-    $('reference').src = `/api/jobs/${id}/reference`;
     const job = history.find(j => j.id === id);
+    showReferences(id, job?.photos?.length ?? 1);
     $('resultTitle').textContent = job?.brief.name || t('untitled');
     renderHistory();
     source = new EventSource(`/api/jobs/${id}/events`);
@@ -258,7 +343,13 @@ $('cancel').addEventListener('click', () => api(`/api/jobs/${currentId}/cancel`,
 
 // ---- start ----
 $('language').value = getLanguage();
-$('language').addEventListener('change', e => { setLanguage(e.target.value); renderAgents(); renderHistory(); });
+$('language').addEventListener('change', async e => {
+    setLanguage(e.target.value);
+    renderAgents();
+    renderPhotos();
+    renderHistory();
+    renderLoad(await api('/api/settings'));
+});
 apply();
 status = await api('/api/status');
 renderAgents();

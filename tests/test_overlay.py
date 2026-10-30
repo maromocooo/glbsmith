@@ -127,3 +127,43 @@ def test_a_cut_out_uses_its_alpha():
     ImageDraw.Draw(photo).rectangle((60, 20, 140, 180), fill=(255, 255, 255, 255))  # white item, on transparent
     mask, _, problem = photo_mask(photo)
     assert problem is None and mask[100, 100] and not mask[100, 10]
+
+
+def busy_photo():
+    """lamp_photo with props on a busy background: its outline cannot be found without help."""
+    rng = np.random.default_rng(3)
+    noise = rng.integers(60, 200, (400, 400, 3), dtype=np.uint8)
+    photo = Image.fromarray(noise)
+    lamp_only = np.asarray(lamp_photo().convert("RGB"))
+    is_lamp = lamp_only.min(axis=-1) < 250
+    pixels = np.asarray(photo).copy()
+    pixels[is_lamp] = lamp_only[is_lamp]
+    return Image.fromarray(pixels), Image.fromarray(is_lamp.astype(np.uint8) * 255)
+
+
+def test_painting_makes_a_busy_photo_measurable():
+    photo, painted = busy_photo()
+    colours = np.full((len(lamp(0.3)), 3), 0.5)
+    args = (lamp(0.3), colours, np.zeros(len(colours), dtype=int), ["lamp"], photo)
+    assert compare(*args, azimuth=0, elevation=0)[0]["verdict"] == "unreliable"
+    assert compare(*args, azimuth=0, elevation=0, painted=painted)[0]["verdict"] == "pass"
+    wide = lamp(1.0)
+    colours = np.full((len(wide), 3), 0.5)
+    failed = compare(wide, colours, np.zeros(len(colours), dtype=int), ["lamp"], photo, azimuth=0, elevation=0, painted=painted)[0]
+    assert failed["verdict"] == "fail"
+
+
+def test_a_rough_stroke_on_a_plain_background_is_trimmed_to_the_item():
+    photo = lamp_photo()
+    rough = Image.new("L", photo.size, 0)
+    ImageDraw.Draw(rough).rectangle((100, 20, 300, 390), fill=255)  # far outside the item
+    mask, _, problem = photo_mask(photo, painted=rough)
+    assert problem is None
+    assert not mask[50, 110]  # inside the stroke, but background
+    assert mask[int(400 * 0.9 - 0.9 * 320), 200]  # the shade
+
+
+def test_a_tiny_painted_area_is_reported():
+    rough = Image.new("L", (400, 400), 0)
+    ImageDraw.Draw(rough).rectangle((200, 200, 202, 202), fill=255)
+    assert photo_mask(lamp_photo(), painted=rough)[2]

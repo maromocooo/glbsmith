@@ -1,6 +1,7 @@
 """The web API with the fake agent and real Blender. Uses no agent quota."""
 
 import io
+import json
 import os
 import subprocess
 import time
@@ -10,7 +11,8 @@ import pytest
 os.environ["GLBSMITH_FAKE_AGENT"] = "1"
 
 from fastapi.testclient import TestClient  # noqa: E402
-from PIL import Image  # noqa: E402
+import numpy as np  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
 
 from glbsmith.app import create_app  # noqa: E402
 from glbsmith.glb import bounds  # noqa: E402
@@ -37,7 +39,7 @@ def client(tmp_path):
 
 
 def submit(client, agent="fake", **form):
-    return client.post("/api/jobs", files={"image": ("p.png", photo())},
+    return client.post("/api/jobs", files={"images": ("p.png", photo())},
                        data={"width": 30, "depth": 20, "height": 90, "agent": agent, **form})
 
 
@@ -85,10 +87,10 @@ def test_cancel_stops_the_agent_and_blender(client, tmp_path, monkeypatch):
 
 
 def test_exif_is_removed(client, tmp_path):
-    response = client.post("/api/jobs", files={"image": ("p.jpg", photo(exif=True))},
+    response = client.post("/api/jobs", files={"images": ("p.jpg", photo(exif=True))},
                            data={"width": 30, "depth": 20, "height": 90, "agent": "fake"})
     job_id = response.json()["id"]
-    assert b"SECRET-CAMERA" not in (tmp_path / job_id / "reference.png").read_bytes()
+    assert b"SECRET-CAMERA" not in (tmp_path / job_id / "reference_0.png").read_bytes()
     wait(client, job_id, {"done", "failed"})
 
 
@@ -125,8 +127,88 @@ def test_models_come_from_each_cli(client, monkeypatch, tmp_path):
     assert client.get("/api/agents/nope/models").status_code == 404
 
 
+def test_several_photos_with_a_painted_one(client, tmp_path):
+    mask = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    ImageDraw.Draw(mask).rectangle((8, 8, 24, 24), fill=(255, 0, 0, 255))
+    painted = io.BytesIO()
+    mask.save(painted, "PNG")
+    files = [("images", ("a.png", photo())), ("images", ("b.png", photo())),
+             ("masks", ("none", b"")), ("masks", ("m.png", painted.getvalue()))]
+    response = client.post("/api/jobs", files=files, data={"width": 30, "depth": 20, "height": 90, "agent": "fake"})
+    assert response.status_code == 201, response.text
+    job = wait(client, response.json()["id"], {"done", "failed"})
+    assert job["status"] == "done", job
+    assert job["photos"] == [{"painted": False}, {"painted": True}]
+    folder = tmp_path / job["id"]
+    assert not (folder / "reference_0_mask.png").exists()
+    stored = np.asarray(Image.open(folder / "reference_1_mask.png"))
+    assert stored[16, 16] == 255 and stored[2, 2] == 0
+    # What the agent and the page see is the highlighted version.
+    view = np.asarray(Image.open(folder / "reference_1_view.png").convert("RGB"), dtype=int)
+    assert view[16, 16].tolist() == [200, 100, 50]
+    assert view[2, 2].min() > 190
+    assert client.get(f"/api/jobs/{job['id']}/reference/1").content == (folder / "reference_1_view.png").read_bytes()
+    assert client.get(f"/api/jobs/{job['id']}/reference/2").status_code == 404
+
+
+def test_blank_mask_counts_as_none(client, tmp_path):
+    blank = io.BytesIO()
+    Image.new("RGBA", (32, 32), (0, 0, 0, 0)).save(blank, "PNG")
+    response = client.post("/api/jobs", files=[("images", ("a.png", photo())), ("masks", ("m.png", blank.getvalue()))],
+                           data={"width": 30, "depth": 20, "height": 90, "agent": "fake"})
+    assert response.json()["photos"] == [{"painted": False}]
+    wait(client, response.json()["id"], {"done", "failed"})
+
+
+def test_too_many_photos_or_mismatched_masks_are_refused(client):
+    data = {"width": 30, "depth": 20, "height": 90, "agent": "fake"}
+    assert client.post("/api/jobs", files=[("images", ("a.png", photo()))] * 9, data=data).status_code == 400
+    two = [("images", ("a.png", photo()))] * 2 + [("masks", ("m", b""))]
+    assert client.post("/api/jobs", files=two, data=data).status_code == 400
+
+
+def test_concurrency_runs_jobs_side_by_side_and_can_change_while_running(client, monkeypatch):
+    monkeypatch.setenv("GLBSMITH_FAKE_PAUSE", "1.5")
+    assert client.get("/api/settings").json()["concurrency"] == 1
+    assert client.put("/api/settings", json={"concurrency": 2}).json()["concurrency"] == 2
+    ids = [submit(client).json()["id"] for _ in range(3)]
+    statuses = lambda: [client.get(f"/api/jobs/{i}").json()["status"] for i in ids]  # noqa: E731
+    deadline = time.time() + 20
+    while time.time() < deadline and statuses().count("running") < 2:
+        time.sleep(0.1)
+    assert statuses() == ["running", "running", "queued"]
+    assert client.get("/api/settings").json() | {"max": 0} == {"concurrency": 2, "max": 0, "running": 2, "queued": 1}
+    # Raising it starts the waiting job straight away, without waiting for a slot.
+    if client.get("/api/settings").json()["max"] >= 3:
+        client.put("/api/settings", json={"concurrency": 3})
+        deadline = time.time() + 10
+        while time.time() < deadline and statuses().count("running") < 3:
+            time.sleep(0.1)
+        assert statuses().count("running") == 3
+    for job_id in ids:
+        assert wait(client, job_id, {"done", "failed"})["status"] == "done"
+    assert client.get("/api/settings").json() | {"max": 0, "concurrency": 0} == {"max": 0, "concurrency": 0, "running": 0, "queued": 0}
+
+
+def test_concurrency_is_kept_and_limited(client, tmp_path):
+    limit = client.get("/api/settings").json()["max"]
+    assert client.put("/api/settings", json={"concurrency": 999}).json()["concurrency"] == limit
+    assert client.put("/api/settings", json={"concurrency": 0}).status_code == 422
+    client.put("/api/settings", json={"concurrency": 1})
+    assert json.loads((tmp_path / "settings.json").read_text())["concurrency"] == 1
+
+
+def test_cancel_a_queued_job_never_starts_it(client, monkeypatch):
+    monkeypatch.setenv("GLBSMITH_FAKE_PAUSE", "1")
+    first = submit(client).json()["id"]
+    second = submit(client).json()["id"]
+    assert client.post(f"/api/jobs/{second}/cancel").json()["cancelled"]
+    assert wait(client, first, {"done", "failed"})["status"] == "done"
+    assert client.get(f"/api/jobs/{second}").json()["status"] == "cancelled"
+
+
 def test_not_an_image_is_refused(client):
-    response = client.post("/api/jobs", files={"image": ("p.png", b"hello")},
+    response = client.post("/api/jobs", files={"images": ("p.png", b"hello")},
                            data={"width": 30, "depth": 20, "height": 90, "agent": "fake"})
     assert response.status_code == 400
 

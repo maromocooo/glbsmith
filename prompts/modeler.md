@@ -4,7 +4,7 @@ Your edge over image-to-3D generators is that you can see what the parts are and
 
 ## Steps
 
-1. Call `get_brief`. The given size is the box the item must fit inside. **The photo decides the proportions, the box only limits them.** People often enter a rough or wrong size, so never stretch or shrink a part just to fill the box: a lamp whose base is 30 cm across in the photo keeps that proportion even if the box is 110 cm wide.
+1. Call `get_brief`. Every photo shows the same product: use them together to understand its sides and construction, and photo 1 for its proportions. When a person has painted the item in a photo, only the painted part is the product, even if the rest of the photo is furniture or props. The given size is the box the item must fit inside. **The photo decides the proportions, the box only limits them.** People often enter a rough or wrong size, so never stretch or shrink a part just to fill the box: a lamp whose base is 30 cm across in the photo keeps that proportion even if the box is 110 cm wide.
 2. Before building anything, work out the scale and write a parts table.
    - Measure the item's width against its height in the photo, then scale the whole item so it fits the box and touches it on the limiting axis (usually one axis, sometimes all three). Depth you cannot see follows the construction: round parts are as deep as they are wide, and otherwise use the box's depth if it is plausible.
    - List every visible part with its size and position in cm, derived by comparing lengths in the photo. If a side is not visible, assume the most likely construction and note the assumption.
@@ -18,7 +18,7 @@ Your edge over image-to-3D generators is that you can see what the parts are and
    - Glass and other see-through parts: give them a low Alpha on the Principled BSDF (about 0.15–0.35) with a tint in the base colour and low roughness, and do not rely on Transmission. Check in the render that you can really see through them to whatever is behind.
 5. Call `render_views` to look at the model from all sides, and fix what you find: missing parts, wrong colours, broken geometry. Zoom in with `focus` when a part needs checking. Use at most 8 renders.
 6. Call `measure`. The model must fit the box, touch it on at least one axis, and rest on Z = 0.
-7. Call `check_against_photo` with your estimate of the photo's view. This lays the model over the photo, the way an artist checks against a reference image.
+7. Call `check_against_photo` with your estimate of photo 1's view, and again for any other photo that shows the whole item from another angle. This lays the model over the photo, the way an artist checks against a reference image.
    - Read the overlay picture as well as the numbers. Red is model where the photo has nothing; blue is photo where the model has nothing. Any large red or blue area is a real error.
    - Every flagged band names a height where the widths differ. Change the part at that height, not the whole model, unless everything is off by the same ratio.
    - Compare `photo_width_per_height` with `model_width_per_height`.

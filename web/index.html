@@ -20,10 +20,10 @@
     <section class="panel form-panel">
         <form id="form">
             <label class="dropzone" id="dropzone" tabindex="0">
-                <input type="file" id="image" accept="image/*" hidden>
-                <img id="preview" alt="" hidden>
-                <span id="dropHint" data-i18n="drop"></span>
+                <input type="file" id="image" accept="image/*" multiple hidden>
+                <span data-i18n="drop"></span>
             </label>
+            <ul class="photos" id="photos"></ul>
             <label class="field"><span data-i18n="name"></span>
                 <input type="text" id="name" maxlength="120" data-i18n-placeholder="namePlaceholder"></label>
             <div class="sizes">
@@ -42,6 +42,9 @@
             <p class="note warn" id="noBlender" hidden data-i18n="noBlender"></p>
             <label class="note warn" id="noSandbox" hidden><input type="checkbox" id="allowUnsandboxed"> <span data-i18n="noSandbox"></span></label>
             <button type="submit" class="primary" id="submit" data-i18n="create"></button>
+            <label class="field concurrency"><span data-i18n="concurrency"></span>
+                <select id="concurrency"></select>
+                <small class="note" id="load" role="status"></small></label>
             <p class="note" data-i18n="quotaNote"></p>
             <p class="note error" id="formError" role="alert" hidden></p>
         </form>
@@ -61,7 +64,8 @@
             </div>
         </div>
         <div class="compare">
-            <figure><figcaption data-i18n="photo"></figcaption><img id="reference" alt=""></figure>
+            <figure><figcaption data-i18n="photo"></figcaption><img id="reference" alt="">
+                <div class="reference-strip" id="referenceStrip"></div></figure>
             <figure class="viewer-wrap" id="viewerWrap">
                 <figcaption data-i18n="result"></figcaption>
                 <div id="viewer"></div>
@@ -78,6 +82,27 @@
 
     <section class="panel empty" id="empty"><p data-i18n="empty"></p></section>
 </main>
+
+<dialog id="paint" aria-labelledby="paintTitle">
+    <h2 id="paintTitle" data-i18n="paint.title"></h2>
+    <p class="note" data-i18n="paint.help"></p>
+    <div class="paint-tools" role="toolbar">
+        <button type="button" data-paint-tool="brush" data-i18n="paint.brush"></button>
+        <button type="button" data-paint-tool="eraser" data-i18n="paint.eraser"></button>
+        <button type="button" data-paint-tool="fill" data-i18n="paint.fill"></button>
+        <label class="brush-size"><span data-i18n="paint.size"></span> <input type="range" id="brushSize" min="1" max="100" value="30"></label>
+        <button type="button" id="paintUndo" data-i18n="paint.undo"></button>
+        <button type="button" id="paintClear" data-i18n="paint.clear"></button>
+    </div>
+    <div class="paint-stage" id="paintStage">
+        <canvas id="paintPhoto"></canvas>
+        <canvas id="paintLayer"></canvas>
+    </div>
+    <div class="paint-actions">
+        <button type="button" id="paintCancel" data-i18n="paint.cancel"></button>
+        <button type="button" class="primary" id="paintSave" data-i18n="paint.save"></button>
+    </div>
+</dialog>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

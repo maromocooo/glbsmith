@@ -35,11 +35,34 @@ select { width: auto; max-width: 100%; }
 .unit input { padding-right: 30px; }
 .unit em { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; font-size: 12px; color: var(--muted); }
 .dropzone {
-    display: grid; place-items: center; min-height: 170px; padding: 12px; text-align: center; cursor: pointer;
+    display: grid; place-items: center; min-height: 92px; padding: 12px; text-align: center; cursor: pointer;
     border: 2px dashed var(--border); border-radius: 10px; color: var(--muted);
 }
 .dropzone.over, .dropzone:focus-visible { border-color: var(--accent); }
-.dropzone img { max-width: 100%; max-height: 220px; border-radius: 6px; background: #fff; }
+.photos { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.photos:empty { display: none; }
+.photos li { border: 1px solid var(--border); border-radius: 8px; padding: 6px; display: grid; gap: 4px; position: relative; min-width: 0; }
+.photos .thumb { position: relative; display: block; }
+.photos .thumb img { width: 100%; height: 110px; object-fit: contain; display: block; background: #fff; border-radius: 4px; }
+.photos .thumb canvas { position: absolute; inset: 0; width: 100%; height: 110px; object-fit: contain; opacity: .55; pointer-events: none; }
+.photos .main-badge { position: absolute; left: 4px; top: 4px; background: var(--accent); color: var(--accent-text); font-size: 11px; padding: 0 6px; border-radius: 4px; }
+.photos .remove { position: absolute; right: 4px; top: 4px; padding: 0 7px; font-size: 13px; line-height: 20px; }
+.photos button.small { padding: 3px 6px; font-size: 12px; }
+.concurrency select { width: 100%; }
+.concurrency small { display: block; }
+.reference-strip { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.reference-strip button { padding: 0; width: 52px; height: 52px; overflow: hidden; background: #fff; }
+.reference-strip button[aria-current=true] { border-color: var(--accent); border-width: 2px; }
+.reference-strip img { width: 100%; height: 100%; object-fit: contain; display: block; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog::backdrop { background: rgb(0 0 0 / .55); }
+.paint-tools, .paint-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.paint-actions { justify-content: flex-end; }
+.paint-tools button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+.brush-size { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.paint-stage { position: relative; margin-top: 10px; background: #fff; border-radius: 8px; overflow: hidden; width: fit-content; max-width: 100%; margin-inline: auto; }
+.paint-stage canvas { display: block; max-width: 100%; max-height: calc(100vh - 260px); }
+#paintLayer { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .55; touch-action: none; cursor: crosshair; }
 .agents { display: grid; gap: 6px; color: var(--text); font-size: 14px; }
 .agents label { display: flex; align-items: center; gap: 8px; }
 .agents label.off { color: var(--muted); }

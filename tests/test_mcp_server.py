@@ -35,7 +35,7 @@ async def scenario(job: Path) -> None:
         assert {"get_brief", "run_python", "measure", "render_views", "check_against_photo", "finalize"} <= names
 
         brief = await session.call_tool("get_brief", {})
-        assert [c.type for c in brief.content] == ["text", "image"]
+        assert [c.type for c in brief.content] == ["text", "text", "image"]
 
         # Nothing built, never checked: no file.
         refused = await session.call_tool("finalize", {})

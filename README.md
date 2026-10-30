@@ -21,14 +21,18 @@ export BLENDER_BIN=/path/to/blender    # or unpack Blender so .tools/blender/ble
 uv run python -m glbsmith.app          # http://127.0.0.1:8021
 ```
 
-Add a photo, enter the width, depth and height, choose an agent and press **Create object**. Progress and renders appear as the agent works; the finished model appears in a 3D viewer next to the photo, with a download button.
+Add one or more photos, enter the width, depth and height, choose an agent and press **Create object**. Progress and renders appear as the agent works; the finished model appears in a 3D viewer next to the photo, with a download button.
+
+- **Several photos** (up to 8): the agent uses them all to understand the sides and construction. The first is the main one: it sets the proportions and must pass the check against the photo. Use **Make main** to change it.
+- **Paint the item**: if a photo also shows other products, props or a busy background, press the button under it and paint what you want made. The agent is told to ignore the rest, and the check uses your paint as the outline, so busy photos can be measured too. On a plain background, a rough stroke is trimmed to the item's edge.
+- **How many to make at once**: jobs beyond this number wait in the queue. Changes apply straight away, and running jobs are never stopped. Rendering threads are shared between jobs, but quota is used up faster.
 
 To try the whole flow without using any quota, run the server with `GLBSMITH_FAKE_AGENT=1` and choose **Fake**. It builds two boxes.
 
 You can also run a job from the command line:
 
 ```bash
-uv run python -m glbsmith.run photo.png --width 35 --depth 35 --height 155 --agent claude
+uv run python -m glbsmith.run photo.png [more.png ...] --width 35 --depth 35 --height 155 --agent claude
 ```
 
 ## What the GLB guarantees
@@ -46,7 +50,7 @@ Any app that follows these conventions can use the file. In [Room Setup](https:/
 
 Before writing the file, the agent has to run `check_against_photo`, the reference-image check 3D artists do by hand. It finds the view that lines the model up with the photo, overlays them, and compares their widths band by band from top to bottom. A base drawn three times too wide shows up as a flagged band, which the agent then fixes. After three failed checks the file is written anyway, with a warning on the page.
 
-Limits: it compares outlines from the one view in the photo, so it can't check depth seen end-on or details inside the outline, and it can't tell a box's front from its back. Those are left to the agent's eye and yours. Photos without a plain background can't be measured automatically; the page says so.
+Limits: it compares outlines one view at a time, so it can't check details inside the outline, and it can't tell a box's front from its back. Those are left to the agent's eye and yours. A main photo with a busy background can't be measured unless you paint the item; the page says so.
 
 ## How it works
 

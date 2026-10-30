@@ -8,15 +8,38 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crc32, deflateSync } from 'node:zlib';
 import puppeteer from 'puppeteer-core';
 
 const baseUrl = process.env.TEST_BASE_URL || 'http://127.0.0.1:8021';
 const shots = process.env.SCREENSHOT_DIR;
 if (shots) mkdirSync(shots, { recursive: true });
 
+function png(width, height) {
+    const chunk = (type, data) => {
+        const body = Buffer.concat([Buffer.from(type), data]);
+        const out = Buffer.alloc(body.length + 8);
+        out.writeUInt32BE(data.length, 0);
+        body.copy(out, 4);
+        out.writeInt32BE(crc32(body) | 0, body.length + 4);
+        return out;
+    };
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(width, 0);
+    header.writeUInt32BE(height, 4);
+    header.set([8, 2, 0, 0, 0], 8);
+    const rows = Buffer.alloc((width * 3 + 1) * height, 200);
+    for (let y = 0; y < height; y++) rows[y * (width * 3 + 1)] = 0;
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+
 // 1×1 PNG.
 const photo = join(tmpdir(), `glbsmith-ui-${process.pid}.png`);
 writeFileSync(photo, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==', 'base64'));
+
+// A larger image to paint on: a 200×150 white PNG made in the browser would need a page, so build it here.
+const bigPhoto = join(tmpdir(), `glbsmith-ui-big-${process.pid}.png`);
+writeFileSync(bigPhoto, png(200, 150));
 
 const browser = await puppeteer.launch({
     executablePath: process.env.CHROME_BIN || '/usr/bin/google-chrome',
@@ -62,7 +85,43 @@ try {
 
     // Full run.
     await (await page.$('#image')).uploadFile(photo);
-    await page.waitForFunction(() => !document.getElementById('preview').hidden);
+    await page.waitForFunction(() => document.querySelectorAll('#photos li').length === 1);
+
+    // A second photo, painted in the modal: brush a stroke, then save.
+    await (await page.$('#image')).uploadFile(bigPhoto);
+    await page.waitForFunction(() => document.querySelectorAll('#photos li').length === 2);
+    const paintButton = (await page.$$('#photos li:nth-child(2) button.small'))[0];
+    await paintButton.click();
+    await page.waitForFunction(() => document.getElementById('paint').open);
+    const box = await (await page.$('#paintLayer')).boundingBox();
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.3, { steps: 6 });
+    await page.mouse.up();
+    await step(page, '015-painting');
+    const inked = () => page.$eval('#paintLayer', c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data.filter((v, i) => i % 4 === 3 && v > 127).length);
+    const afterStroke = await inked();
+    assert.ok(afterStroke > 0);
+    // Undo removes it; redo the stroke; bucket fill paints the rest of the empty area.
+    await page.click('#paintUndo');
+    assert.equal(await inked(), 0);
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.3, { steps: 6 });
+    await page.mouse.up();
+    await page.click('[data-paint-tool=fill]');
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.8);
+    assert.ok(await inked() > afterStroke);
+    await page.click('#paintUndo');
+    assert.equal(await inked(), afterStroke);
+    await page.click('#paintSave');
+    await page.waitForFunction(() => !document.getElementById('paint').open && document.querySelector('#photos canvas[data-painted]'));
+    // Esc in the modal keeps what was saved.
+    await (await page.$$('#photos li:nth-child(2) button.small'))[0].click();
+    await page.waitForFunction(() => document.getElementById('paint').open);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('paint').open);
+    assert.ok(await page.$('#photos canvas[data-painted]'));
     await page.type('#name', 'テスト品');
     await page.click('#submit');
     await page.waitForFunction(() => !document.getElementById('result').hidden);
@@ -74,9 +133,23 @@ try {
     assert.equal(await page.$eval('#checkNote', el => el.hidden), false);
     assert.equal(await page.$eval('#sizeNote', el => el.hidden), true);
     assert.equal(await page.$eval('#history', el => el.children.length), 1);
+    assert.equal(await page.$$eval('#referenceStrip button', els => els.length), 2);
+    assert.equal(await page.$$eval('#photos li', els => els.length), 0, 'form is ready for the next item');
     await step(page, '02-done');
+    const saved = await page.evaluate(async () => (await (await fetch('/api/jobs')).json())[0].photos);
+    assert.deepEqual(saved, [{ painted: false }, { painted: true }]);
+
+    // How many at once: changing it reaches the server.
+    await page.waitForSelector('#concurrency option');
+    await page.select('#concurrency', '2');
+    await page.waitForFunction(async () => (await (await fetch('/api/settings')).json()).concurrency === 2);
+    assert.match(await page.$eval('#load', el => el.textContent), /実行中 \d+/);
+    await page.select('#concurrency', '1');
 
     // Cancelled job keeps the page usable.
+    await (await page.$('#image')).uploadFile(photo);
+    await page.waitForFunction(() => document.querySelectorAll('#photos li').length === 1);
+    for (const [id, value] of [['width', '30'], ['depth', '20'], ['height', '90']]) await page.type(`#${id}`, value);
     await page.click('#submit');
     await page.waitForFunction(() => document.querySelectorAll('#history li').length === 2);
     await page.waitForFunction(() => !document.getElementById('cancel').hidden, { timeout: 30000 }).catch(() => {});

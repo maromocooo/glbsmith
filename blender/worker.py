@@ -180,6 +180,14 @@ def build_rig():
     return camera_object, camera, remove
 
 
+def limit_threads(scene):
+    """Parallel jobs share the CPU; the job queue decides each one's share."""
+    threads = BRIEF.get("render_threads")
+    if threads:
+        scene.render.threads_mode = "FIXED"
+        scene.render.threads = threads
+
+
 def cmd_render_views(views=None, focus=None, label="render"):
     """Render fixed views to PNGs. Orthographic views share one scale so proportions can be compared."""
     views = views or ["front", "right", "top", "angled"]
@@ -201,6 +209,7 @@ def cmd_render_views(views=None, focus=None, label="render"):
     scene = bpy.context.scene
     render = scene.render
     render.engine = "CYCLES"
+    limit_threads(scene)
     scene.cycles.device = "CPU"
     scene.cycles.samples = 24
     scene.cycles.use_denoising = True
@@ -318,6 +327,7 @@ def cmd_bake_materials(size=1024):
     """Bake procedural base colours to image textures, one per object and material."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
+    limit_threads(scene)
     scene.cycles.device = "CPU"
     scene.cycles.samples = 8
     baked = []
