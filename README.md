@@ -2,6 +2,10 @@
 
 Turn a product photo and its dimensions into a true-to-size GLB. A local AI agent (Claude Code or Codex, using your own subscription) models the item part by part in Blender, compares renders with the photo, and fixes what is off.
 
+![A desk photo with a microphone setup painted on it, next to the finished 3D model in the viewer](docs/images/result.png)
+
+<sub>Paint what you want on a photo, and get a true-to-size 3D model. Left: the photo, with everything but the painted item faded. Right: the model. The blue box is the size you entered. The product photos in the small row are blurred here.</sub>
+
 Image-to-3D generators can stretch a model to the right outer size, but they often lose what is inside that box. An agent can see that a floor lamp has a big shade, a thin stem and a small base, and build each part on purpose.
 
 It can also build several things that are used together as one model:
