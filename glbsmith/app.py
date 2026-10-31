@@ -30,7 +30,6 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 MAX_COLOURS = 5
 MAX_SPOTS = 4000
 MAX_INSTRUCTION = 4000
-MAX_ATTACHMENTS = 4
 
 
 class PaintRequest(BaseModel):
@@ -38,13 +37,13 @@ class PaintRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=MAX_INSTRUCTION)
     # [x, y, z, radius] in metres, on the GLB as the page showed it.
     points: list[tuple[float, float, float, float]] = Field(min_length=1, max_length=MAX_SPOTS)
-    images: list[str] = Field(default=[], max_length=MAX_ATTACHMENTS)  # data URLs
+    images: list[str] = []  # data URLs
 
 
 class Revision(BaseModel):
     requests: list[PaintRequest] = Field(default=[], max_length=MAX_COLOURS)
     general: str = Field(default="", max_length=MAX_INSTRUCTION)
-    general_images: list[str] = Field(default=[], max_length=MAX_ATTACHMENTS)
+    general_images: list[str] = []
     agent: str
     model: str | None = None
     view: str | None = None  # PNG data URL of what the person was looking at

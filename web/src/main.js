@@ -1,4 +1,5 @@
 import { apply, getLanguage, setLanguage, t } from './i18n.js';
+import { clipboardImages } from './clipboard.js';
 import { ModelPicker } from './models.js';
 import { setupOptions } from './options.js';
 import { paintMask } from './paint.js';
@@ -80,7 +81,7 @@ for (const type of ['dragenter', 'dragover']) $('dropzone').addEventListener(typ
 for (const type of ['dragleave', 'drop']) $('dropzone').addEventListener(type, e => { e.preventDefault(); $('dropzone').classList.remove('over'); });
 $('dropzone').addEventListener('drop', e => addPhotos(e.dataTransfer.files));
 // While making changes, a pasted image belongs to the instruction instead (see revise.js).
-addEventListener('paste', e => { if (!$('result').classList.contains('revising')) addPhotos(e.clipboardData.files); });
+addEventListener('paste', e => { if (!$('result').classList.contains('revising')) addPhotos(clipboardImages(e)); });
 
 // ---- model choice ----
 const selectedAgent = () => document.querySelector('input[name=agent]:checked')?.value;

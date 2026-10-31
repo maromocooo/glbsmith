@@ -227,6 +227,31 @@ try {
     assert.equal(await page.$$eval('#photos li', els => els.length), formPhotos);
     await page.click('#generalAttachments .attached button');
     await step(page, '026-attached');
+
+    // Pasting images into an instruction: any number, and typing carries on where it was.
+    const paste = (selector, count) => page.evaluate(async (target, n) => {
+        const box = document.querySelector(target);
+        box.focus();
+        const blob = await (await fetch(document.querySelector('#generalAttachments img').src)).blob();
+        for (let i = 0; i < n; i++) {
+            const data = new DataTransfer();
+            data.items.add(new File([blob], `pasted-${i}.png`, { type: 'image/png' }));
+            document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+        }
+    }, selector, count);
+    await paste('#colours li:nth-child(2) textarea', 6);
+    await page.waitForFunction(() => document.querySelectorAll('#colours li:nth-child(2) .attached').length === 6);
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('#colours li:nth-child(2) textarea')), true, 'still typing');
+    assert.equal(await page.$$eval('#colours li:nth-child(1) .attached', els => els.length), 1, 'the other instruction is untouched');
+    // Dropping on the text box counts too.
+    await page.evaluate(async () => {
+        const box = document.querySelector('#colours li:nth-child(2) textarea');
+        const blob = await (await fetch(document.querySelector('#generalAttachments img').src)).blob();
+        const data = new DataTransfer();
+        data.items.add(new File([blob], 'dropped.png', { type: 'image/png' }));
+        box.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    await page.waitForFunction(() => document.querySelectorAll('#colours li:nth-child(2) .attached').length === 7);
     const prompts = await page.$$('#colours textarea');
     await prompts[0].type('上を長くして');
     await prompts[1].type('ここはそのまま');
@@ -246,7 +271,7 @@ try {
     assert.equal(await page.evaluate(async () => (await (await fetch('/api/jobs')).json())[0].model), 'my-model-1');
     await page.waitForFunction(() => document.getElementById('viewer').dataset.loaded === 'true', { timeout: 120000 });
     assert.match(await page.$eval('#measure', el => el.textContent), /× 130\.5 cm/, 'the fake agent made it taller');
-    assert.match(await page.$eval('#log', el => el.textContent), /2 attached image\(s\)/);
+    assert.match(await page.$eval('#log', el => el.textContent), /9 attached image\(s\)/);
     assert.equal(await page.$eval('#revise', el => el.hidden), true);
     assert.equal(await page.$eval('#reviseStart', el => el.hidden), false);
     assert.equal(await page.$eval('#history', el => el.children.length), 2);

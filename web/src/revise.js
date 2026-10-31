@@ -2,11 +2,11 @@
 // each with its own instruction, then start a revision job.
 
 import { t } from './i18n.js';
+import { clipboardImages } from './clipboard.js';
 import { ModelPicker } from './models.js';
 
 const $ = id => document.getElementById(id);
 const COLOURS = ['#e6194b', '#2f80ed', '#27ae60', '#f2a900', '#9b51e0'];
-const MAX_IMAGES = 4;
 
 let context = null; // { viewer, agents, job, submit }
 let rows = [];      // { id, colour, prompt, images: [{ file, url }] }
@@ -17,11 +17,7 @@ function attach(list, files, redraw) {
     const images = [...files].filter(file => file.type.startsWith('image/'));
     if (!images.length) return;
     $('reviseError').hidden = true;
-    if (list.length + images.length > MAX_IMAGES) {
-        $('reviseError').textContent = t('revise.tooManyImages', { n: MAX_IMAGES });
-        $('reviseError').hidden = false;
-    }
-    for (const file of images.slice(0, MAX_IMAGES - list.length)) list.push({ file, url: URL.createObjectURL(file) });
+    for (const file of images) list.push({ file, url: URL.createObjectURL(file) });
     redraw();
 }
 
@@ -31,7 +27,6 @@ function fillAttachments(host, list, redraw) {
     input.addEventListener('change', () => { attach(list, input.files, redraw); input.value = ''; });
     const button = Object.assign(document.createElement('button'), { type: 'button', textContent: t('revise.attach'), title: t('revise.attachHelp') });
     button.addEventListener('click', () => input.click());
-    button.hidden = list.length >= MAX_IMAGES;
     host.replaceChildren(...list.map(image => {
         const box = Object.assign(document.createElement('span'), { className: 'attached' });
         const remove = Object.assign(document.createElement('button'), { type: 'button', textContent: '×' });
@@ -44,12 +39,18 @@ function fillAttachments(host, list, redraw) {
         box.append(Object.assign(document.createElement('img'), { src: image.url, alt: image.file.name }), remove);
         return box;
     }), button, input);
-    host.ondragover = event => { event.preventDefault(); host.classList.add('over'); };
-    host.ondragleave = () => host.classList.remove('over');
-    host.ondrop = event => { event.preventDefault(); host.classList.remove('over'); attach(list, event.dataTransfer.files, redraw); };
 }
 
 const renderGeneral = () => fillAttachments($('generalAttachments'), generalImages, renderGeneral);
+for (const [type, listener] of [
+    ['dragover', event => { event.preventDefault(); $('generalAttachments').classList.add('over'); }],
+    ['dragleave', () => $('generalAttachments').classList.remove('over')],
+    ['drop', event => {
+        event.preventDefault();
+        $('generalAttachments').classList.remove('over');
+        attach(generalImages, event.dataTransfer.files, renderGeneral);
+    }],
+]) for (const area of [$('generalAttachments'), $('reviseGeneral')]) area.addEventListener(type, listener);
 
 const asDataUrl = file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -85,6 +86,9 @@ function addRow() {
 }
 
 function renderRows() {
+    // Redrawing replaces the text boxes: stay in the one being typed in, so pasting doesn't interrupt.
+    const typing = rows.findIndex((_, index) => $('colours').children[index]?.querySelector('textarea') === document.activeElement);
+    const caret = typing >= 0 ? document.activeElement.selectionStart : 0;
     $('colours').replaceChildren(...rows.map((row, index) => {
         const item = document.createElement('li');
         const swatch = Object.assign(document.createElement('button'), { type: 'button', className: 'swatch' });
@@ -100,6 +104,14 @@ function renderRows() {
         const attachments = Object.assign(document.createElement('div'), { className: 'attachments' });
         fillAttachments(attachments, row.images, renderRows);
         comment.append(prompt, attachments);
+        // The whole instruction takes dropped images, text box included.
+        comment.addEventListener('dragover', event => { event.preventDefault(); attachments.classList.add('over'); });
+        comment.addEventListener('dragleave', () => attachments.classList.remove('over'));
+        comment.addEventListener('drop', event => {
+            event.preventDefault();
+            attachments.classList.remove('over');
+            attach(row.images, event.dataTransfer.files, renderRows);
+        });
         item.append(swatch, comment);
         if (rows.length > 1) {
             const remove = Object.assign(document.createElement('button'), { type: 'button', className: 'remove', textContent: '×' });
@@ -114,6 +126,11 @@ function renderRows() {
         return item;
     }));
     $('addColour').hidden = rows.length >= COLOURS.length;
+    if (typing >= 0) {
+        const box = $('colours').children[typing]?.querySelector('textarea');
+        box?.focus();
+        box?.setSelectionRange(caret, caret);
+    }
 }
 
 function renderAgents() {
@@ -160,8 +177,9 @@ export function relabelRevise() {
 // Pasting: into the instruction being typed, or else the colour in use.
 addEventListener('paste', event => {
     if (!context) return;
-    if (event.target === $('reviseGeneral')) attach(generalImages, event.clipboardData.files, renderGeneral);
-    else if (active) attach(active.images, event.clipboardData.files, renderRows);
+    const images = clipboardImages(event);
+    if (event.target === $('reviseGeneral')) attach(generalImages, images, renderGeneral);
+    else if (active) attach(active.images, images, renderRows);
 });
 
 for (const button of document.querySelectorAll('[data-revise-tool]')) button.addEventListener('click', () => setTool(button.dataset.reviseTool));

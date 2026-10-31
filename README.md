@@ -62,7 +62,7 @@ uv run python -m glbsmith.run photo.png [more.png ...] --width 35 --depth 35 --h
 
 ## Making changes
 
-When a model is close but not right, press **Make changes** on the result. Paint on the model in 3D with up to five colours, write an instruction for each ("make this longer", "add a peg here so it fits into the desk"), and press **Start changes**. You can also add an instruction about the whole model. Any instruction can have up to four images attached, by pasting, dropping or the button, to show what you mean.
+When a model is close but not right, press **Make changes** on the result. Paint on the model in 3D with up to five colours, write an instruction for each ("make this longer", "add a peg here so it fits into the desk"), and press **Start changes**. You can also add an instruction about the whole model. Any instruction can have as many images attached as you like, by pasting, dropping or the button, to show what you mean. Each one adds to the tokens used.
 
 The agent reopens the same Blender scene and is told to change only what was asked. It gets the paint as exact positions, the parts it landed on, and pictures of it. The result is a new entry in the history, and the original stays as it was, so you can go back or try something else.
 

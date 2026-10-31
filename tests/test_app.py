@@ -330,7 +330,6 @@ def test_images_attached_to_instructions_reach_the_agent_cleaned(client, tmp_pat
 
 @pytest.mark.parametrize("images", [
     ["data:text/html;base64,AAAA"], ["data:image/png;base64,AAAA"], ["not a url"],
-    [data_url(photo())] * 5,
 ])
 def test_bad_attachments_are_refused(client, images):
     parent = finished_job(client)
@@ -439,6 +438,19 @@ def test_other_sites_cannot_set_a_key(client):
     response = client.put("/api/keys/openai", json={"key": KEY}, headers={"origin": "https://evil.example"})
     assert response.status_code == 403
     assert client.get("/api/keys").json()["openai"]["set"] is False
+
+
+def test_any_number_of_images_can_be_attached(client, tmp_path):
+    parent = finished_job(client)
+    many = [data_url(photo())] * 12
+    response = client.post(f"/api/jobs/{parent['id']}/revise", json={
+        "requests": [{**request_for((0, 0.8, 0)), "images": many}], "general": "see these", "general_images": many, "agent": "fake",
+    })
+    assert response.status_code == 201, response.text
+    child = wait(client, response.json()["id"], {"done", "failed"})
+    assert child["status"] == "done", child
+    assert len(list((tmp_path / child["id"]).glob("attached_*"))) == 24
+    assert "24 attached image(s)" in (tmp_path / child["id"] / "agent.jsonl").read_text()
 
 
 def test_not_an_image_is_refused(client):
