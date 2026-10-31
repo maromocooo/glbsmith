@@ -34,6 +34,14 @@ def photo(exif=False) -> bytes:
     return buffer.getvalue()
 
 
+@pytest.fixture(autouse=True)
+def private_keys(tmp_path, monkeypatch):
+    """Tests never see the person's own keys, saved or exported."""
+    monkeypatch.setenv("GLBSMITH_CONFIG", str(tmp_path / "config"))
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def client(tmp_path):
     with TestClient(create_app(tmp_path), headers=HOST) as client:
@@ -329,6 +337,108 @@ def test_bad_attachments_are_refused(client, images):
     body = {"requests": [{**request_for((0, 0, 0)), "images": images}], "agent": "fake"}
     assert client.post(f"/api/jobs/{parent['id']}/revise", json=body).status_code in (400, 422)
     assert client.post(f"/api/jobs/{parent['id']}/revise", json={"general": "x", "general_images": images, "agent": "fake"}).status_code in (400, 422)
+
+
+KEY = "sk-test-0123456789-secret"
+
+
+def agent_ids(client):
+    return [a["id"] for a in client.get("/api/status").json()["agents"]]
+
+
+def test_api_agents_appear_with_a_key_and_leave_with_it(client, tmp_path):
+    assert "claude-api" not in agent_ids(client) and "codex-api" not in agent_ids(client)
+    described = client.put("/api/keys/anthropic", json={"key": KEY}).json()
+    assert described["anthropic"] == {"set": True, "source": "saved", "ends_with": "cret", "environment": "ANTHROPIC_API_KEY"}
+    assert described["openai"]["set"] is False
+    ids = agent_ids(client)
+    if "claude" in ids:
+        assert "claude-api" in ids and "codex-api" not in ids
+        agent = next(a for a in client.get("/api/status").json()["agents"] if a["id"] == "claude-api")
+        assert agent["label"] == "Claude Code (API)" and agent["billing"] == "api"
+    client.put("/api/keys/anthropic", json={"key": ""})
+    assert client.get("/api/keys").json()["anthropic"]["set"] is False
+    assert "claude-api" not in agent_ids(client)
+
+
+def test_the_key_never_comes_back_and_is_stored_privately(client, tmp_path):
+    client.put("/api/keys/openai", json={"key": KEY})
+    assert KEY not in client.get("/api/keys").text and KEY not in client.get("/api/status").text
+    path = tmp_path / "config" / "keys.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    assert KEY in path.read_text()
+
+
+def test_a_key_in_the_environment_counts_but_is_not_saved(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    assert client.get("/api/keys").json()["openai"]["source"] == "environment"
+    assert not (tmp_path / "config" / "keys.json").exists()
+
+
+def test_only_the_api_agents_get_the_key(client, tmp_path, monkeypatch):
+    from glbsmith.agents import AGENTS
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "exported-anthropic-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "exported-openai-key")
+    job = tmp_path / "job"
+    job.mkdir()
+    (job / "brief.json").write_text("{}")
+    for agent in ("claude", "codex"):
+        env = AGENTS[agent].launch(job, None).env
+        assert not {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY"} & set(env), agent
+    assert AGENTS["claude-api"].launch(job, None).env["ANTHROPIC_API_KEY"] == "exported-anthropic-key"
+    assert AGENTS["codex-api"].launch(job, None).env["CODEX_API_KEY"] == "exported-openai-key"
+    # It goes through the environment only, never into a file or the command line.
+    launch = AGENTS["claude-api"].launch(job, None)
+    assert "exported-anthropic-key" not in " ".join(launch.args)
+    assert "exported-anthropic-key" not in (job / "mcp.json").read_text()
+
+
+def test_codex_errors_read_as_text():
+    from glbsmith.agents import AGENTS
+
+    line = json.dumps({"type": "turn.failed", "error": {"message": "401 Unauthorized"}})
+    assert AGENTS["codex"].parse(line) == [{"kind": "error", "text": "401 Unauthorized"}]
+    assert AGENTS["codex"].parse(json.dumps({"type": "error", "message": "boom"})) == [{"kind": "error", "text": "boom"}]
+
+
+def test_blender_never_sees_a_key(tmp_path, monkeypatch):
+    from glbsmith.blender_client import BlenderWorker
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", KEY)
+    Image.new("RGB", (8, 8)).save(tmp_path / "p.png")
+    (tmp_path / "brief.json").write_text(json.dumps({"width": 10, "depth": 10, "height": 10, "image": "p.png"}))
+    worker = BlenderWorker(tmp_path)
+    worker.start()
+    try:
+        output = worker.call("run_python", code="import os; print(sorted(os.environ))")["output"]
+    finally:
+        worker.stop()
+    assert "ANTHROPIC_API_KEY" not in output and "HOME" in output
+
+
+def test_a_job_whose_key_is_gone_fails_clearly(client, monkeypatch):
+    import glbsmith.agents as agents
+
+    monkeypatch.setitem(agents.AGENTS, "claude-api", agents.ClaudeApiAgent())
+    monkeypatch.setattr(agents.shutil, "which", lambda name: "/usr/bin/" + name)
+    client.put("/api/keys/anthropic", json={"key": KEY})
+    job_id = submit(client, agent="claude-api").json()["id"]
+    client.put("/api/keys/anthropic", json={"key": ""})
+    job = wait(client, job_id, {"done", "failed"})
+    assert job["status"] == "failed"
+
+
+@pytest.mark.parametrize("provider, key, status", [("nope", KEY, 404), ("openai", "short", 400), ("openai", "has spaces in it", 400), ("openai", "x" * 501, 422)])
+def test_bad_keys_are_refused(client, provider, key, status):
+    assert client.put(f"/api/keys/{provider}", json={"key": key}).status_code == status
+
+
+def test_other_sites_cannot_set_a_key(client):
+    response = client.put("/api/keys/openai", json={"key": KEY}, headers={"origin": "https://evil.example"})
+    assert response.status_code == 403
+    assert client.get("/api/keys").json()["openai"]["set"] is False
 
 
 def test_not_an_image_is_refused(client):

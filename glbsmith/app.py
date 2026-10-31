@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from . import keys
 from .agents import AGENTS
 from .blender_client import blender_binary
 from .jobs import Jobs
@@ -75,7 +76,9 @@ def create_app(root: Path = JOBS) -> FastAPI:
     @app.get("/api/status")
     def status():
         return {
-            "agents": [{"id": a.id, "label": a.label, "available": a.available()} for a in AGENTS.values()],
+            # An "(API)" agent is only an option once it has a key.
+            "agents": [{"id": a.id, "label": a.label, "available": a.available(), "billing": a.billing}
+                       for a in AGENTS.values() if a.billing != "api" or a.available()],
             "blender": Path(blender_binary()).exists(),
             "sandbox": landlock_abi() > 0,
         }
@@ -85,6 +88,20 @@ def create_app(root: Path = JOBS) -> FastAPI:
         if agent_id not in AGENTS:
             raise HTTPException(404, "No such agent.")
         return AGENTS[agent_id].models()
+
+    @app.get("/api/keys")
+    def api_keys():
+        return keys.describe()
+
+    @app.put("/api/keys/{provider}")
+    def set_api_key(provider: str, key: str = Body("", embed=True, max_length=500)):
+        if provider not in keys.PROVIDERS:
+            raise HTTPException(404, "No such provider.")
+        key = key.strip()
+        if key and not re.fullmatch(r"[\x21-\x7e]{8,}", key):
+            raise HTTPException(400, "That doesn't look like an API key.")
+        keys.save(provider, key or None)
+        return keys.describe()
 
     @app.get("/api/settings")
     def settings():

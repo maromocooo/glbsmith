@@ -4,15 +4,34 @@ Turn a product photo and its dimensions into a true-to-size GLB. A local AI agen
 
 Image-to-3D generators can stretch a model to the right outer size, but they often lose what is inside that box. An agent can see that a floor lamp has a big shade, a thin stem and a small base, and build each part on purpose.
 
+It can also build several things that are used together as one model:
+
+![Adding photos of a desk, painting a microphone setup on them, the agent modelling and checking it, and the finished 3D model turning in the viewer](docs/images/demo.webp)
+
+<sub>The video is sped up: ×10 while adding photos and painting, ×20 while the agent works, and ×2 for the result. The product photos in the list are blurred here.</sub>
+
+What happens between pressing **Create object** and the model appearing:
+
+1. **Read the photos.** The agent looks at all of them, works out the camera angle and writes a table of every part with its size and position.
+2. **Model.** It builds each part in Blender with Python: tubes as curves, holes as real holes, each part with its own name and material.
+3. **Look from all sides.** It renders the front, side, top and an angled view, and fixes what it finds.
+4. **Lay it over the photo.** `check_against_photo` overlays the model on the photo in the same view and compares widths from top to bottom. The agent fixes what is flagged and checks again.
+5. **Measure and write the file.** glbsmith measures the model itself, checks it against the size you entered, writes the GLB and reads it back to confirm.
+6. **Your turn.** The result opens in a 3D viewer next to the photo. Anything that isn't right can be painted and changed.
+
+One photo is enough to start. Photos from different angles help up to a point, because the agent sees sides and shapes that one view hides, which is why this run has several similar-looking shots of the same desk. That is experience so far, not a measurement: a benchmark of how photo count affects quality is planned.
+
+This run used seven photos, four of them painted, and made a model of 74 parts, 72.3 × 14.7 × 50 cm, in about 7 minutes and 820,000 tokens with Codex. Its overlay check stayed below the pass line (0.45 against 0.6), so the file was written with a warning on the page, which you can read at the end of the video: on a busy photo, paint that goes over the edges counts as part of the outline.
+
 | Works well | Works less well |
 |---|---|
-| Lamps, shelves, tables, chair frames, PC cases: clear parts, thin members, real gaps | Plush toys, wrinkled fabric, intricate carving, photo-exact patterns |
+| Lamps, shelves, tables, chair frames, PC cases, desk gear: clear parts, thin members, real gaps, several items in one | Plush toys, wrinkled fabric, intricate carving, photo-exact patterns |
 
 Sides that the photo does not show are still guesses.
 
 ## Quick start
 
-Requirements: Linux, [uv](https://docs.astral.sh/uv/), Node.js 22+, [Blender](https://www.blender.org/download/) 5.2 LTS, and a logged-in `claude` or `codex` CLI.
+Requirements: Linux, [uv](https://docs.astral.sh/uv/), Node.js 22+, [Blender](https://www.blender.org/download/) 5.2 LTS, and the `claude` or `codex` CLI, signed in with your own account or used with your own API key.
 
 ```bash
 uv sync
@@ -23,9 +42,11 @@ uv run python -m glbsmith.app          # http://127.0.0.1:8021
 
 Add one or more photos, enter the width, depth and height, choose an agent and press **Create object**. Progress and renders appear as the agent works; the finished model appears in a 3D viewer next to the photo, with a download button.
 
-- **Several photos** (up to 8): the agent uses them all to understand the sides and construction. The first is the main one: it sets the proportions and must pass the check against the photo. Use **Make main** to change it.
+- **Several photos** (up to 8): one is enough, and more angles improve the result up to a point. The agent uses them all to understand the sides and construction. The first is the main one: it sets the proportions and must pass the check against the photo. Use **Make main** to change it.
 - **Paint the item**: if a photo also shows other products, props or a busy background, press the button under it and paint what you want made. The agent is told to ignore the rest, and the check uses your paint as the outline, so busy photos can be measured too. On a plain background, a rough stroke is trimmed to the item's edge.
 - **How many to make at once**: jobs beyond this number wait in the queue. Changes apply straight away, and running jobs are never stopped. Rendering threads are shared between jobs, but quota is used up faster.
+
+**Options** lets you add an API key. An agent then also appears as **Claude Code (API)** or **Codex (API)**, billed per use on that key. The plain choices keep using your subscription and never get the key. A key exported as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` counts too.
 
 To try the whole flow without using any quota, run the server with `GLBSMITH_FAKE_AGENT=1` and choose **Fake**. It builds two boxes.
 
@@ -79,7 +100,18 @@ The agent gets eight tools and nothing else: `get_brief`, `get_revision_requests
 - The agents run without shell or file tools, and without your settings, hooks or other MCP servers.
 - The server binds to localhost and refuses other sites and hostnames. It has no authentication, so do not expose it to a network.
 - The photos are sent to the service of the agent you choose. EXIF data such as GPS position is removed first. Painting fades the rest of a photo but does not remove it, so anything in the frame still goes along. Crop out what should not be sent.
-- `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are removed from the agent's environment, so a job cannot silently switch to pay-per-use billing.
+- API keys are saved in plain text in `~/.config/glbsmith/keys.json`, readable only by you, and never sent back to the page. A key reaches only the agent you chose as "(API)", through its environment, and never reaches Blender. Subscription choices run without any key, so a job cannot silently switch to pay-per-use billing.
+
+## Using your subscription
+
+glbsmith runs the official, unmodified `claude` and `codex` programs on your own computer, signed in with your own account. It never sees or stores your login, and it isn't a hosted service. Your use of those programs stays under your own agreement with their makers, so check their terms yourself:
+
+- Anthropic: [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance). Plan limits assume ordinary, individual use, and developers building products are directed to API keys.
+- OpenAI: [Codex authentication](https://learn.chatgpt.com/docs/auth). API keys are the recommended default for automation.
+
+If you're unsure, or you run many jobs at once, use an API key through **Options**. Don't offer glbsmith to other people as a service on your own login.
+
+glbsmith is an independent project, not affiliated with or endorsed by Anthropic or OpenAI. Claude and Claude Code are trademarks of Anthropic; Codex and ChatGPT are trademarks of OpenAI.
 
 ## Images and licences
 

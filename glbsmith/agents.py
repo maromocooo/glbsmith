@@ -9,6 +9,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import keys
+
 PROJECT = Path(__file__).resolve().parent.parent
 PROMPTS = {name: (PROJECT / "prompts" / f"{name}.md").read_text() for name in ("modeler", "reviser")}
 
@@ -17,8 +19,9 @@ def prompt_for(job: Path) -> str:
     brief = json.loads((job / "brief.json").read_text())
     return PROMPTS["reviser" if brief.get("revision") else "modeler"]
 
-# Never let a job fall back to pay-per-use API billing, and do not look like a
-# nested session when started from inside one.
+# A subscription agent must not fall back to pay-per-use billing because a key
+# happens to be exported (the "(API)" agents exist for that), and must not look
+# like a nested session when started from inside one.
 STRIPPED_ENV = {
     "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY",
     "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT",
@@ -52,11 +55,15 @@ class ClaudeAgent:
     id = "claude"
     label = "Claude Code"
     binary = "claude"
+    billing = "subscription"
     # The CLI has no way to list models. These aliases always mean the latest of each, so they do not go stale.
     ALIASES = (("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"))
 
     def available(self) -> bool:
         return shutil.which(self.binary) is not None
+
+    def env(self) -> dict:
+        return agent_env()
 
     def _configured_model(self) -> str | None:
         home = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
@@ -83,7 +90,7 @@ class ClaudeAgent:
                "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence"]
         if model:
             cli += ["--model", model]
-        return Launch(cli, prompt_for(job), agent_env())
+        return Launch(cli, prompt_for(job), self.env())
 
     def parse(self, line: str) -> list[dict]:
         event = json.loads(line)
@@ -107,9 +114,13 @@ class CodexAgent:
     id = "codex"
     label = "Codex"
     binary = "codex"
+    billing = "subscription"
 
     def available(self) -> bool:
         return shutil.which(self.binary) is not None
+
+    def env(self) -> dict:
+        return agent_env()
 
     def _configured(self) -> dict:
         path = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
@@ -122,7 +133,7 @@ class CodexAgent:
         """Models this account can choose, from the CLI's own catalog (it refreshes it when needed)."""
         options = []
         try:
-            done = subprocess.run([self.binary, "debug", "models"], capture_output=True, text=True, timeout=20, env=agent_env())
+            done = subprocess.run([self.binary, "debug", "models"], capture_output=True, text=True, timeout=20, env=self.env())
             listed = [m for m in json.loads(done.stdout)["models"] if m.get("visibility") == "list"]
             listed.sort(key=lambda m: m.get("priority", 999))
             options = [{"id": m["slug"], "label": m.get("display_name") or m["slug"]} for m in listed]
@@ -149,7 +160,7 @@ class CodexAgent:
             cli += ["-m", model]
         if effort:
             cli += ["-c", f'model_reasoning_effort="{effort}"']
-        return Launch([*cli, "-"], prompt_for(job), agent_env())
+        return Launch([*cli, "-"], prompt_for(job), self.env())
 
     def parse(self, line: str) -> list[dict]:
         event = json.loads(line)
@@ -165,8 +176,47 @@ class CodexAgent:
         if kind == "turn.completed":
             return [{"kind": "usage", "usage": event.get("usage")}]
         if kind in ("error", "turn.failed"):
-            return [{"kind": "error", "text": json.dumps(event)[:500]}]
+            error = event.get("error")
+            message = (error.get("message") if isinstance(error, dict) else None) or event.get("message") or json.dumps(event)
+            return [{"kind": "error", "text": str(message)[:500]}]
         return []
+
+
+class _WithApiKey:
+    """The same CLI, signed in with the person's API key and billed per use."""
+
+    billing = "api"
+    provider = ""
+    variable = ""
+
+    def available(self) -> bool:
+        return super().available() and bool(keys.get(self.provider))
+
+    def env(self) -> dict:
+        key = keys.get(self.provider)
+        if not key:
+            raise RuntimeError(f"No API key is set for {self.label}. Add one in Options.")
+        return {**agent_env(), self.variable: key}
+
+    def models(self) -> dict:
+        try:
+            return super().models()
+        except RuntimeError:
+            return {"default": None, "options": []}
+
+
+class ClaudeApiAgent(_WithApiKey, ClaudeAgent):
+    id = "claude-api"
+    label = "Claude Code (API)"
+    provider = "anthropic"
+    variable = "ANTHROPIC_API_KEY"
+
+
+class CodexApiAgent(_WithApiKey, CodexAgent):
+    id = "codex-api"
+    label = "Codex (API)"
+    provider = "openai"
+    variable = "CODEX_API_KEY"  # what `codex exec` reads
 
 
 class FakeAgent:
@@ -174,6 +224,7 @@ class FakeAgent:
 
     id = "fake"
     label = "Fake (no AI)"
+    billing = "none"
 
     def available(self) -> bool:
         return True
@@ -189,6 +240,6 @@ class FakeAgent:
         return [json.loads(line)]
 
 
-AGENTS = {agent.id: agent for agent in (ClaudeAgent(), CodexAgent())}
+AGENTS = {agent.id: agent for agent in (ClaudeAgent(), CodexAgent(), ClaudeApiAgent(), CodexApiAgent())}
 if os.environ.get("GLBSMITH_FAKE_AGENT") == "1":
     AGENTS["fake"] = FakeAgent()

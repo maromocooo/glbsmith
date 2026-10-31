@@ -98,6 +98,8 @@ def run_job(job: Path, agent_id: str, *, model: str | None = None, timeout: floa
             summary["tools"][event["name"]] = summary["tools"].get(event["name"], 0) + 1
         elif event["kind"] == "usage":
             summary["usage"] = event
+            if event.get("is_error"):  # e.g. an invalid API key
+                summary["error"] = event.get("text")
         elif event["kind"] == "text":
             summary["last_text"] = event["text"]
         elif event["kind"] == "error":

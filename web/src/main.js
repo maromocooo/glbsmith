@@ -1,5 +1,6 @@
 import { apply, getLanguage, setLanguage, t } from './i18n.js';
 import { ModelPicker } from './models.js';
+import { setupOptions } from './options.js';
 import { paintMask } from './paint.js';
 import { closeRevise, openRevise, relabelRevise } from './revise.js';
 import { Viewer } from './viewer.js';
@@ -84,7 +85,11 @@ addEventListener('paste', e => { if (!$('result').classList.contains('revising')
 // ---- model choice ----
 const selectedAgent = () => document.querySelector('input[name=agent]:checked')?.value;
 const modelPicker = new ModelPicker({ select: $('modelSelect'), customField: $('modelCustom'), custom: $('model'), agent: selectedAgent });
-$('agents').addEventListener('change', () => modelPicker.load(''));
+$('agents').addEventListener('change', () => { modelPicker.load(''); showBilling(); });
+function showBilling() {
+    const agent = status.agents.find(a => a.id === selectedAgent());
+    $('billingNote').hidden = agent?.billing !== 'api';
+}
 
 function renderAgents() {
     const host = $('agents');
@@ -101,6 +106,7 @@ function renderAgents() {
     const pick = host.querySelector(`input[value="${chosen}"]`) ?? host.querySelector('input:not(:disabled)');
     if (pick && !pick.disabled) pick.checked = true;
     modelPicker.load();
+    showBilling();
 }
 
 $('form').addEventListener('submit', async e => {
@@ -345,11 +351,18 @@ $('language').addEventListener('change', async e => {
     renderPhotos();
     renderHistory();
     relabelRevise();
+    options.relabel();
     renderLoad(await api('/api/settings'));
 });
 apply();
 status = await api('/api/status');
 renderAgents();
+const options = setupOptions({
+    async onChange() {
+        status = await api('/api/status');
+        renderAgents();
+    },
+});
 $('noBlender').hidden = status.blender;
 $('noSandbox').hidden = status.sandbox;
 $('submit').disabled = !status.blender;

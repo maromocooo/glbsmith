@@ -59,6 +59,32 @@ try {
     await page.waitForFunction(() => window.glbsmith);
     await step(page, '01-empty');
 
+    // Options: an API key adds an "(API)" agent, and the page never gets the key back.
+    const hasApiAgent = () => page.$('input[value=claude-api]').then(Boolean);
+    assert.equal(await hasApiAgent(), false);
+    await page.click('#optionsOpen');
+    await page.waitForFunction(() => document.getElementById('options').open);
+    await page.type('.key-row[data-provider=anthropic] input', 'sk-ui-test-0123456789abcd');
+    await page.click('.key-row[data-provider=anthropic] button.primary');
+    await page.waitForFunction(() => document.querySelector('.key-row[data-provider=anthropic] small').textContent.includes('…abcd'));
+    await step(page, '005-options');
+    assert.equal(await page.$eval('.key-row[data-provider=anthropic] input', el => el.value), '');
+    assert.ok(!(await page.content()).includes('sk-ui-test'), 'the key is not in the page');
+    if (await page.evaluate(async () => (await (await fetch('/api/status')).json()).agents.some(a => a.id === 'claude'))) {
+        await page.waitForSelector('input[value=claude-api]');
+        await page.click('#optionsClose');
+        await page.click('input[value=claude-api]');
+        assert.equal(await page.$eval('#billingNote', el => el.hidden), false, 'says it is billed per use');
+        await page.click('input[value=claude]');
+        assert.equal(await page.$eval('#billingNote', el => el.hidden), true);
+        await page.click('#optionsOpen');
+        await page.waitForFunction(() => document.getElementById('options').open);
+    }
+    await page.click('.key-row[data-provider=anthropic] .inputs button:last-child');
+    await page.waitForFunction(() => document.querySelector('.key-row[data-provider=anthropic] small').textContent === '未設定');
+    await page.click('#optionsClose');
+    assert.equal(await hasApiAgent(), false);
+
     // Missing photo is reported in place.
     await page.type('#width', '30');
     await page.type('#depth', '20');

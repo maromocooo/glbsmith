@@ -24,7 +24,7 @@ h2 { font-size: 16px; margin: 0; } h3 { font-size: 14px; margin: 18px 0 8px; }
 form { display: grid; gap: 12px; }
 .field { display: grid; gap: 4px; border: 0; padding: 0; margin: 0; font-size: 13px; color: var(--muted); min-width: 0; }
 legend { padding: 0; margin-bottom: 4px; }
-input[type=text], input[type=number], select {
+input[type=text], input[type=number], input[type=password], select {
     width: 100%; padding: 8px 10px; font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--border); border-radius: 8px; min-width: 0;
 }
@@ -100,6 +100,14 @@ details { margin-top: 14px; }
 .revise h3 { margin: 0; }
 .revise .paint-tools, .revise .paint-actions { margin-top: 0; }
 .revise .paint-tools button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+#options { width: min(560px, calc(100vw - 32px)); }
+#options h2 { margin-bottom: 6px; }
+.key-rows { display: grid; gap: 14px; margin-top: 12px; }
+.key-row { display: grid; gap: 4px; }
+.key-row .inputs { display: flex; flex-wrap: wrap; gap: 6px; }
+.key-row input { flex: 1 1 200px; }
+.key-row strong { font-size: 14px; }
+#billingNote { display: block; margin-top: 6px; }
 .colours { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .colours li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; }
 .colours .swatch { width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 3px solid transparent; outline: 1px solid var(--border); }

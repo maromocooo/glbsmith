@@ -11,6 +11,7 @@
 <header>
     <h1>glbsmith</h1>
     <p data-i18n="tagline"></p>
+    <button type="button" id="optionsOpen" data-i18n="options.open"></button>
     <label class="lang"><span class="sr" data-i18n="language"></span>
         <select id="language"><option value="ja">日本語</option><option value="en">English</option></select>
     </label>
@@ -34,6 +35,7 @@
             <fieldset class="field">
                 <legend data-i18n="agent"></legend>
                 <div id="agents" class="agents"></div>
+                <small class="note warn" id="billingNote" data-i18n="options.billingNote" hidden></small>
             </fieldset>
             <label class="field"><span data-i18n="model"></span>
                 <select id="modelSelect"></select></label>
@@ -108,6 +110,14 @@
 
     <section class="panel empty" id="empty"><p data-i18n="empty"></p></section>
 </main>
+
+<dialog id="options" aria-labelledby="optionsTitle">
+    <h2 id="optionsTitle" data-i18n="options.title"></h2>
+    <p class="note" data-i18n="options.help"></p>
+    <div class="key-rows" id="keyRows"></div>
+    <p class="note error" id="optionsError" role="alert" hidden></p>
+    <div class="paint-actions"><button type="button" id="optionsClose" data-i18n="options.close"></button></div>
+</dialog>
 
 <dialog id="paint" aria-labelledby="paintTitle">
     <h2 id="paintTitle" data-i18n="paint.title"></h2>
