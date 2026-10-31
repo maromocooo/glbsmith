@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw  # noqa: E402
 
 from glbsmith.app import create_app  # noqa: E402
 from glbsmith.glb import bounds  # noqa: E402
+from glbsmith.run import token_usage  # noqa: E402
 
 HOST = {"host": "127.0.0.1:8021"}
 
@@ -262,6 +263,72 @@ def test_only_a_finished_model_can_be_revised(client, monkeypatch):
     assert client.post(f"/api/jobs/{running}/revise", json={"general": "x", "agent": "fake"}).status_code == 400
     assert client.post("/api/jobs/nothere/revise", json={"general": "x", "agent": "fake"}).status_code == 404
     wait(client, running, {"done", "failed"})
+
+
+def test_token_usage_means_the_same_for_every_agent():
+    claude = {"usage": {"usage": {"input_tokens": 12, "cache_creation_input_tokens": 34275, "cache_read_input_tokens": 114601, "output_tokens": 25024}}}
+    assert token_usage(claude) == {"total": 173912, "input": 148888, "cached": 114601, "output": 25024}
+    codex = {"usage": {"usage": {"input_tokens": 381747, "cached_input_tokens": 349184, "output_tokens": 2495}}}
+    assert token_usage(codex) == {"total": 384242, "input": 381747, "cached": 349184, "output": 2495}
+    assert token_usage({"usage": None}) is None
+    assert token_usage({}) is None
+
+
+def test_finished_job_reports_tokens(client):
+    job = finished_job(client)
+    assert job["tokens"] == {"total": 12345, "input": 12000, "cached": 9000, "output": 345}
+    assert client.get("/api/jobs").json()[0]["tokens"]["total"] == 12345
+
+
+def test_cancelled_job_has_no_tokens_and_does_not_break(client, monkeypatch):
+    monkeypatch.setenv("GLBSMITH_FAKE_PAUSE", "5")
+    job_id = submit(client).json()["id"]
+    wait(client, job_id, {"running"})
+    client.post(f"/api/jobs/{job_id}/cancel")
+    deadline = time.time() + 15
+    while time.time() < deadline and client.get("/api/settings").json()["running"]:
+        time.sleep(0.2)
+    assert client.get(f"/api/jobs/{job_id}").json()["tokens"] is None
+    assert client.get("/api/jobs").status_code == 200
+
+
+def data_url(content: bytes, kind="png") -> str:
+    return f"data:image/{kind};base64,{base64.b64encode(content).decode()}"
+
+
+def test_images_attached_to_instructions_reach_the_agent_cleaned(client, tmp_path):
+    parent = finished_job(client)
+    secret = photo(exif=True)
+    body = {
+        "requests": [{**request_for((0, 0.8, 0)), "images": [data_url(secret, "jpeg"), data_url(photo())]}],
+        "general": "like this one", "general_images": [data_url(photo())], "agent": "fake",
+    }
+    response = client.post(f"/api/jobs/{parent['id']}/revise", json=body)
+    assert response.status_code == 201, response.text
+    child = wait(client, response.json()["id"], {"done", "failed"})
+    assert child["status"] == "done", child
+    folder = tmp_path / child["id"]
+    saved = json.loads((folder / "revision.json").read_text())
+    assert saved["requests"][0]["images"] == ["attached_colour1_1.png", "attached_colour1_2.png"]
+    assert saved["general_images"] == ["attached_general_1.png"]
+    assert b"SECRET-CAMERA" not in (folder / "attached_colour1_1.png").read_bytes()
+    assert "3 attached image(s)" in (folder / "agent.jsonl").read_text()
+    # A revision of it starts clean: attachments belong to the instruction they came with.
+    second = client.post(f"/api/jobs/{child['id']}/revise", json={"general": "more", "agent": "fake"}).json()
+    assert wait(client, second["id"], {"done", "failed"})["status"] == "done"
+    assert not list((tmp_path / second["id"]).glob("attached_*"))
+    assert "0 attached image(s)" in (tmp_path / second["id"] / "agent.jsonl").read_text()
+
+
+@pytest.mark.parametrize("images", [
+    ["data:text/html;base64,AAAA"], ["data:image/png;base64,AAAA"], ["not a url"],
+    [data_url(photo())] * 5,
+])
+def test_bad_attachments_are_refused(client, images):
+    parent = finished_job(client)
+    body = {"requests": [{**request_for((0, 0, 0)), "images": images}], "agent": "fake"}
+    assert client.post(f"/api/jobs/{parent['id']}/revise", json=body).status_code in (400, 422)
+    assert client.post(f"/api/jobs/{parent['id']}/revise", json={"general": "x", "general_images": images, "agent": "fake"}).status_code in (400, 422)
 
 
 def test_not_an_image_is_refused(client):

@@ -1,5 +1,6 @@
 """Job queue for the web app: runs up to `concurrency` jobs at once, state kept in each job's folder."""
 
+import contextlib
 import json
 import os
 import shutil
@@ -75,7 +76,10 @@ class Jobs:
         with_report = path / "report.json"
         if with_report.exists():
             report = json.loads(with_report.read_text())
-        return {"id": job_id, **state, "brief": {k: brief.get(k) for k in ("name", "width", "depth", "height")},
+        tokens = None
+        with contextlib.suppress(OSError, json.JSONDecodeError):
+            tokens = runner.token_usage(json.loads((path / "summary.json").read_text()))
+        return {"id": job_id, **state, "tokens": tokens, "brief": {k: brief.get(k) for k in ("name", "width", "depth", "height")},
                 "photos": [{"painted": bool(p["mask"])} for p in runner.brief_images(brief)],
                 "has_model": (path / "model.glb").exists() and state.get("status") == "done", "report": report,
                 "created": (path / "brief.json").stat().st_mtime}
@@ -93,8 +97,11 @@ class Jobs:
             self._changed.notify_all()
         return job.name
 
-    def revise(self, parent_id: str, *, requests: list[dict], general: str, agent: str, model: str | None, view: bytes | None) -> str:
-        """A new job that continues from a finished model. The original stays as it was."""
+    def revise(self, parent_id: str, *, requests: list[dict], general: str, general_images: list = (), agent: str, model: str | None, view: bytes | None) -> str:
+        """A new job that continues from a finished model. The original stays as it was.
+
+        Each request's `images`, and `general_images`, are files the person attached to that instruction.
+        """
         parent = self.root / parent_id
         report = json.loads((parent / "report.json").read_text())
         state = self._read(parent) or {}
@@ -108,8 +115,18 @@ class Jobs:
                 if photo[key] and not (job / photo[key]).exists():
                     shutil.copyfile(parent / photo[key], job / photo[key])
         shutil.copyfile(parent / "model.blend", job / "model.blend")
+        def attach(images, prefix: str) -> list[str]:
+            names = []
+            for number, image in enumerate(images, 1):
+                names.append(f"{prefix}_{number}.png")
+                runner.clean_image(image).save(job / names[-1])
+            return names
+
+        requests = [{**request, "images": attach(request.get("images", ()), f"attached_colour{index}")}
+                    for index, request in enumerate(requests, 1)]
         (job / "revision.json").write_text(json.dumps({
-            "parent": parent_id, "requests": requests, "general": general, "glb_size_cm": report["glb_size_cm"],
+            "parent": parent_id, "requests": requests, "general": general,
+            "general_images": attach(general_images, "attached_general"), "glb_size_cm": report["glb_size_cm"],
         }))
         if view:
             (job / "revision_view.png").write_bytes(view)

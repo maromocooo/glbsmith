@@ -46,7 +46,8 @@ export class ModelPicker {
         } catch {
             return;
         }
-        if (agent === this.agent()) this.render(wanted);
+        // The person may have chosen something while the list was on its way; that wins.
+        if (agent === this.agent()) this.render(this.select.value || wanted);
     }
 
     /** The model name to send: empty means the CLI's default. */

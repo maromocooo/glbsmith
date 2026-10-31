@@ -78,7 +78,8 @@ $('dropzone').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key 
 for (const type of ['dragenter', 'dragover']) $('dropzone').addEventListener(type, e => { e.preventDefault(); $('dropzone').classList.add('over'); });
 for (const type of ['dragleave', 'drop']) $('dropzone').addEventListener(type, e => { e.preventDefault(); $('dropzone').classList.remove('over'); });
 $('dropzone').addEventListener('drop', e => addPhotos(e.dataTransfer.files));
-addEventListener('paste', e => addPhotos(e.clipboardData.files));
+// While making changes, a pasted image belongs to the instruction instead (see revise.js).
+addEventListener('paste', e => { if (!$('result').classList.contains('revising')) addPhotos(e.clipboardData.files); });
 
 // ---- model choice ----
 const selectedAgent = () => document.querySelector('input[name=agent]:checked')?.value;
@@ -135,6 +136,8 @@ $('form').addEventListener('submit', async e => {
 });
 
 // ---- history ----
+const shortNumber = value => new Intl.NumberFormat(getLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+const tokenDetail = tokens => t('tokenDetail', Object.fromEntries(Object.entries(tokens).map(([key, value]) => [key, value.toLocaleString(getLanguage())])));
 let history = [];
 async function refreshHistory() {
     history = await api('/api/jobs');
@@ -179,7 +182,8 @@ function renderHistory() {
         const text = document.createElement('span');
         text.textContent = job.brief.name || t('untitled');
         const detail = document.createElement('small');
-        detail.textContent = [t(`status.${job.status}`), job.agent, job.model].filter(Boolean).join(' · ');
+        detail.textContent = [t(`status.${job.status}`), job.agent, job.model, job.tokens && t('tokens', { n: shortNumber(job.tokens.total) })].filter(Boolean).join(' · ');
+        if (job.tokens) detail.title = tokenDetail(job.tokens);
         if (job.revision_number) text.prepend(`${t('revision', { n: job.revision_number })}: `);
         text.append(detail);
         button.append(image, text);
@@ -234,6 +238,7 @@ async function renderState(job) {
     if (!running || !$('status').textContent) {
         let text = t(`status.${job.status}`);
         if (job.seconds) text += ` · ${t('elapsed', { s: job.seconds })}`;
+        if (job.tokens) text += ` · ${tokenDetail(job.tokens)}`;
         if (job.error) text += ` · ${job.error}`;
         $('status').textContent = text;
     }

@@ -29,6 +29,7 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 MAX_COLOURS = 5
 MAX_SPOTS = 4000
 MAX_INSTRUCTION = 4000
+MAX_ATTACHMENTS = 4
 
 
 class PaintRequest(BaseModel):
@@ -36,11 +37,13 @@ class PaintRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=MAX_INSTRUCTION)
     # [x, y, z, radius] in metres, on the GLB as the page showed it.
     points: list[tuple[float, float, float, float]] = Field(min_length=1, max_length=MAX_SPOTS)
+    images: list[str] = Field(default=[], max_length=MAX_ATTACHMENTS)  # data URLs
 
 
 class Revision(BaseModel):
     requests: list[PaintRequest] = Field(default=[], max_length=MAX_COLOURS)
     general: str = Field(default="", max_length=MAX_INSTRUCTION)
+    general_images: list[str] = Field(default=[], max_length=MAX_ATTACHMENTS)
     agent: str
     model: str | None = None
     view: str | None = None  # PNG data URL of what the person was looking at
@@ -155,21 +158,24 @@ def create_app(root: Path = JOBS) -> FastAPI:
             raise HTTPException(400, "Say what to change.")
         if revision.model and not re.fullmatch(r"[\w.\-:\[\]]{1,80}", revision.model):
             raise HTTPException(400, "Invalid model name.")
-        view = None
-        if revision.view:
-            prefix = "data:image/png;base64,"
+        def decode(url: str) -> bytes:
+            match = re.match(r"data:image/[\w.+-]+;base64,", url)
             try:
-                if not revision.view.startswith(prefix):
-                    raise ValueError("not a PNG data URL")
-                view = base64.b64decode(revision.view[len(prefix):], validate=True)
-                if len(view) > MAX_UPLOAD:
+                if not match:
+                    raise ValueError("not an image data URL")
+                data = base64.b64decode(url[match.end():], validate=True)
+                if len(data) > MAX_UPLOAD:
                     raise ValueError("too large")
-                with Image.open(io.BytesIO(view)) as probe:
+                with Image.open(io.BytesIO(data)) as probe:
                     probe.verify()
             except Exception as error:  # noqa: BLE001 - Pillow raises many types for bad files
-                raise HTTPException(400, "The view image is not readable.") from error
-        new_id = jobs.revise(job_id, requests=[r.model_dump() for r in revision.requests], general=revision.general.strip(),
-                             agent=revision.agent, model=revision.model or None, view=view)
+                raise HTTPException(400, "An attached image is not readable.") from error
+            return data
+
+        requests = [{**r.model_dump(), "images": [io.BytesIO(decode(url)) for url in r.images]} for r in revision.requests]
+        new_id = jobs.revise(job_id, requests=requests, general=revision.general.strip(),
+                             general_images=[io.BytesIO(decode(url)) for url in revision.general_images],
+                             agent=revision.agent, model=revision.model or None, view=decode(revision.view) if revision.view else None)
         return jobs.get(new_id)
 
     @app.get("/api/jobs/{job_id}")

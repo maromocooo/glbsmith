@@ -172,6 +172,11 @@ def get_revision_requests() -> list:
         lines.append(f"Colour {index} ({request['color']}): {request['prompt']}\n"
                      f"  Painted on: {where}. Painted area from {request.get('painted_from_cm')} to {request.get('painted_to_cm')} cm (X, Y, Z).")
     content = ["\n".join(lines)]
+    for name in revision.get("general_images", ()):
+        content += ["Image the person attached to the instruction about the whole model:", Image(path=str(JOB / name))]
+    for index, request in enumerate(revision["requests"], 1):
+        for name in request.get("images", ()):
+            content += [f"Image the person attached to the instruction for colour {index}:", Image(path=str(JOB / name))]
     if (JOB / "revision_view.png").exists():
         content += ["What the person was looking at when they painted (the same colours):", Image(path=str(JOB / "revision_view.png"))]
     return content + pictures

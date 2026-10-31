@@ -6,3 +6,19 @@ web/dist/
 __pycache__/
 *.pyc
 .env
+
+# Notes and settings for AI coding tools used while developing this project
+AGENTS.md
+AGENT.md
+agents.md
+agent.md
+CLAUDE.md
+CLAUDE.local.md
+claude.md
+GEMINI.md
+.claude/
+.codex/
+.cursor/
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md

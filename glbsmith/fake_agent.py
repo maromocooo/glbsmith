@@ -52,7 +52,9 @@ async def main(job: str) -> None:
             return await session.call_tool(name, args)
 
         if brief.get("revision"):
-            await call("get_revision_requests")
+            answer = await call("get_revision_requests")
+            attached = sum(1 for c in answer.content if c.type == "text" and c.text.startswith("Image the person attached"))
+            say(kind="text", text=f"Fake agent: {attached} attached image(s).")
             await call("run_python", code=REVISE)
             await call("render_views", views=["front"], show_marks=True)
             await call("finalize")
@@ -66,6 +68,7 @@ async def main(job: str) -> None:
         await call("check_against_photo")
         await call("finalize")
     say(kind="text", text="Fake agent: done. This is a placeholder, not a real model.")
+    say(kind="usage", usage={"input_tokens": 12000, "cached_input_tokens": 9000, "output_tokens": 345})
 
 
 asyncio.run(main(sys.argv[1]))

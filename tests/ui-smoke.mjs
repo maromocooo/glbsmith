@@ -133,6 +133,9 @@ try {
     assert.equal(await page.$eval('#checkNote', el => el.hidden), false);
     assert.equal(await page.$eval('#sizeNote', el => el.hidden), true);
     assert.equal(await page.$eval('#history', el => el.children.length), 1);
+    // Tokens used: short in the history, in full on the result.
+    assert.match(await page.$eval('#history small', el => el.textContent), /完成 · fake · 1\.2万 トークン/);
+    assert.match(await page.$eval('#status', el => el.textContent), /合計 12,345 トークン（入力 12,000、うちキャッシュ 9,000 ／ 出力 345）/);
     assert.equal(await page.$$eval('#referenceStrip button', els => els.length), 2);
     assert.equal(await page.$$eval('#photos li', els => els.length), 0, 'form is ready for the next item');
     await step(page, '02-done');
@@ -176,6 +179,28 @@ try {
     await new Promise(r => setTimeout(r, 80));
     await page.mouse.up();
     assert.ok(await spots(1) > 0, 'second colour');
+    // An image attached to the first colour's instruction, one to the whole-model one, and one removed again.
+    const pick = async host => (await page.$(`${host} input[type=file]`)).uploadFile(bigPhoto);
+    await pick('#colours li:nth-child(1) .attachments');
+    await page.waitForFunction(() => document.querySelectorAll('#colours li:nth-child(1) .attached').length === 1);
+    await pick('#colours li:nth-child(1) .attachments');
+    await page.waitForFunction(() => document.querySelectorAll('#colours li:nth-child(1) .attached').length === 2);
+    await page.click('#colours li:nth-child(1) .attached button');
+    await page.waitForFunction(() => document.querySelectorAll('#colours li:nth-child(1) .attached').length === 1);
+    await pick('#generalAttachments');
+    await page.waitForFunction(() => document.querySelectorAll('#generalAttachments .attached').length === 1);
+    // Pasting while making changes goes to the instruction, not the new-item form.
+    const formPhotos = await page.$$eval('#photos li', els => els.length);
+    await page.evaluate(async () => {
+        const data = new DataTransfer();
+        const blob = await (await fetch(document.querySelector('#generalAttachments img').src)).blob();
+        data.items.add(new File([blob], 'pasted.png', { type: 'image/png' }));
+        document.getElementById('reviseGeneral').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+    });
+    await page.waitForFunction(() => document.querySelectorAll('#generalAttachments .attached').length === 2);
+    assert.equal(await page.$$eval('#photos li', els => els.length), formPhotos);
+    await page.click('#generalAttachments .attached button');
+    await step(page, '026-attached');
     const prompts = await page.$$('#colours textarea');
     await prompts[0].type('上を長くして');
     await prompts[1].type('ここはそのまま');
@@ -195,6 +220,7 @@ try {
     assert.equal(await page.evaluate(async () => (await (await fetch('/api/jobs')).json())[0].model), 'my-model-1');
     await page.waitForFunction(() => document.getElementById('viewer').dataset.loaded === 'true', { timeout: 120000 });
     assert.match(await page.$eval('#measure', el => el.textContent), /× 130\.5 cm/, 'the fake agent made it taller');
+    assert.match(await page.$eval('#log', el => el.textContent), /2 attached image\(s\)/);
     assert.equal(await page.$eval('#revise', el => el.hidden), true);
     assert.equal(await page.$eval('#reviseStart', el => el.hidden), false);
     assert.equal(await page.$eval('#history', el => el.children.length), 2);
