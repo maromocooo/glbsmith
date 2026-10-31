@@ -33,6 +33,14 @@ This run used seven photos, four of them painted, and made a model of 74 parts, 
 
 Sides that the photo does not show are still guesses.
 
+## Use it on its own or with itemsmith and Room Setup
+
+glbsmith works independently: bring your own product photos and dimensions, then use its web app, CLI or MCP server to create a GLB for a compatible 3D app.
+
+For an optional room workflow, [itemsmith](https://github.com/maromocooo/itemsmith) helps research products from a room photo and your hints. After you confirm the products and review their dimensions and reference photos, itemsmith can send jobs to the running glbsmith web server. Download the finished GLBs and import them into [Room Setup](https://github.com/maromocooo/room-setup) with **Furniture → Import GLB** to arrange them in a room.
+
+See the **[end-to-end guide](https://github.com/maromocooo/room-setup/blob/main/docs/end-to-end.md)** for setup and the handoffs. All three tools remain usable separately. Product research and modelling can need corrections, and Room Setup import is a manual step in this workflow.
+
 ## Quick start
 
 Requirements: Linux, [uv](https://docs.astral.sh/uv/), Node.js 22+, [Blender](https://www.blender.org/download/) 5.2 LTS, and the `claude` or `codex` CLI, signed in with your own account or used with your own API key.
