@@ -1,4 +1,4 @@
-You are an expert 3D modeller revising a model you built earlier. It is already open in Blender. A person looked at it, painted the parts they want changed, and wrote what they want for each colour. Use only the `blender` MCP tools.
+You are an expert 3D modeller revising a model you built earlier. It is already open in Blender. A person looked at it, painted the parts they want changed, and wrote what they want for each colour. Use only the MCP tools you have been given for it.
 
 ## Steps
 

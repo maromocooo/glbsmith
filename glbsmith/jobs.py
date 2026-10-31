@@ -3,10 +3,8 @@
 import contextlib
 import json
 import os
-import shutil
 import signal
 import threading
-import uuid
 from collections import deque
 from pathlib import Path
 
@@ -103,37 +101,10 @@ class Jobs:
         Each request's `images`, and `general_images`, are files the person attached to that instruction.
         """
         parent = self.root / parent_id
-        report = json.loads((parent / "report.json").read_text())
-        state = self._read(parent) or {}
-        job = self.root / uuid.uuid4().hex[:12]
-        job.mkdir()
-        brief = json.loads((parent / "brief.json").read_text())
-        brief.pop("render_threads", None)
-        photos = runner.brief_images(brief)
-        for photo in photos:
-            for key in ("file", "mask", "view"):
-                if photo[key] and not (job / photo[key]).exists():
-                    shutil.copyfile(parent / photo[key], job / photo[key])
-        shutil.copyfile(parent / "model.blend", job / "model.blend")
-        def attach(images, prefix: str) -> list[str]:
-            names = []
-            for number, image in enumerate(images, 1):
-                names.append(f"{prefix}_{number}.png")
-                runner.clean_image(image).save(job / names[-1])
-            return names
-
-        requests = [{**request, "images": attach(request.get("images", ()), f"attached_colour{index}")}
-                    for index, request in enumerate(requests, 1)]
-        (job / "revision.json").write_text(json.dumps({
-            "parent": parent_id, "requests": requests, "general": general,
-            "general_images": attach(general_images, "attached_general"), "glb_size_cm": report["glb_size_cm"],
-        }))
-        if view:
-            (job / "revision_view.png").write_bytes(view)
-        (job / "brief.json").write_text(json.dumps({**brief, "images": photos, "revision": True}))
+        job = runner.create_revision(parent, requests=requests, general=general, general_images=general_images, view=view)
         with self._changed:
             self._write(job.name, {"status": "queued", "agent": agent, "model": model, "revision_of": parent_id,
-                                   "revision_number": state.get("revision_number", 0) + 1})
+                                   "revision_number": runner.revision_number(parent) + 1})
             self.queue.append(job.name)
             self._changed.notify_all()
         return job.name

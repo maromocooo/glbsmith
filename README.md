@@ -60,6 +60,33 @@ You can also run a job from the command line:
 uv run python -m glbsmith.run photo.png [more.png ...] --width 35 --depth 35 --height 155 --agent claude
 ```
 
+## Use it from any AI agent (MCP)
+
+glbsmith is also an MCP server. An agent that can read images from tools, such as Claude Code, Codex or Claude Desktop, can then make models itself: nothing else is launched, so it uses that agent's own plan, and the web app doesn't need to be running.
+
+```bash
+claude mcp add glbsmith -- uv run -q --directory /path/to/glbsmith python -m glbsmith.mcp_server
+codex mcp add glbsmith -- uv run -q --directory /path/to/glbsmith python -m glbsmith.mcp_server
+```
+
+For Claude Desktop, add this to its config:
+
+```json
+{ "mcpServers": { "glbsmith": { "command": "uv", "args": ["run", "-q", "--directory", "/path/to/glbsmith", "python", "-m", "glbsmith.mcp_server"] } } }
+```
+
+Then ask for what you want: "Make a 3D model of the lamp in ~/photos/lamp.jpg. It's 130 cm tall."
+
+| Tool | What it does |
+|---|---|
+| `start_model` | Starts a model from photo files and a size, and returns the steps to follow |
+| `get_brief`, `run_python`, `measure`, `render_views`, `check_against_photo`, `bake_materials` | The same work the web app's agents do, with the same sandbox |
+| `finalize` | Applies the same size and photo checks, writes the GLB and returns its path |
+| `revise_model` | Changes a finished model from an instruction, keeping the original |
+| `list_models` | Lists the models made so far and where each GLB is |
+
+Models appear in the web app's history too, so you can look at them in 3D, or paint changes on them. Set `BLENDER_BIN` in the server's environment if Blender isn't in `.tools/blender`, and `GLBSMITH_JOBS` to keep the models somewhere else.
+
 ## Making changes
 
 When a model is close but not right, press **Make changes** on the result. Paint on the model in 3D with up to five colours, write an instruction for each ("make this longer", "add a peg here so it fits into the desk"), and press **Start changes**. You can also add an instruction about the whole model. Any instruction can have as many images attached as you like, by pasting, dropping or the button, to show what you mean. Each one adds to the tokens used.

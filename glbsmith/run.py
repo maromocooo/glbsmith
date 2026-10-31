@@ -6,6 +6,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -63,6 +64,50 @@ def create_job(images, width: float, depth: float, height: float, *, name: str |
         **({"allow_unsandboxed": True} if allow_unsandboxed else {}),
     }))
     return job
+
+
+def create_revision(parent: Path, *, requests: list[dict], general: str, general_images=(), view: bytes | None = None) -> Path:
+    """A new job folder that continues from a finished model, whose own folder stays as it was.
+
+    Each request's `images`, and `general_images`, are files attached to that instruction.
+    """
+    report = json.loads((parent / "report.json").read_text())
+    job = parent.parent / uuid.uuid4().hex[:12]
+    job.mkdir()
+    brief = json.loads((parent / "brief.json").read_text())
+    brief.pop("render_threads", None)
+    photos = brief_images(brief)
+    for photo in photos:
+        for key in ("file", "mask", "view"):
+            if photo[key] and not (job / photo[key]).exists():
+                shutil.copyfile(parent / photo[key], job / photo[key])
+    shutil.copyfile(parent / "model.blend", job / "model.blend")
+
+    def attach(images, prefix: str) -> list[str]:
+        names = []
+        for number, image in enumerate(images, 1):
+            names.append(f"{prefix}_{number}.png")
+            clean_image(image).save(job / names[-1])
+        return names
+
+    requests = [{**request, "images": attach(request.get("images", ()), f"attached_colour{index}")}
+                for index, request in enumerate(requests, 1)]
+    (job / "revision.json").write_text(json.dumps({
+        "parent": parent.name, "requests": requests, "general": general,
+        "general_images": attach(general_images, "attached_general"), "glb_size_cm": report["glb_size_cm"],
+    }))
+    if view:
+        (job / "revision_view.png").write_bytes(view)
+    (job / "brief.json").write_text(json.dumps({**brief, "images": photos, "revision": True}))
+    return job
+
+
+def revision_number(job: Path) -> int:
+    """How many revisions led to this model: 0 for an original."""
+    try:
+        return json.loads((job / "state.json").read_text()).get("revision_number") or 0
+    except (OSError, json.JSONDecodeError):
+        return 0
 
 
 def brief_images(brief: dict) -> list[dict]:
