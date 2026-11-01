@@ -308,6 +308,38 @@ try {
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => window.glbsmith);
     assert.equal(await page.$eval('#history', el => el.children.length), 3);
+
+    // A long name stays inside the panel, and the current entry's frame with it.
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.click('#history li .open');
+    await page.waitForFunction(() => document.querySelector('#history li:has([aria-current=true])'));
+    // In one go, as the list is redrawn whenever a job's state arrives.
+    const overflow = await page.$eval('#history', list => {
+        list.querySelector('span').firstChild.textContent = 'とても長い名前'.repeat(20);
+        const panel = list.closest('.panel').getBoundingClientRect();
+        return [...list.children].map(item => item.getBoundingClientRect().right - panel.right).filter(gap => gap >= 0);
+    });
+    assert.deepEqual(overflow, [], 'entries stay inside the panel');
+    await step(page, '04-history');
+
+    // Removing from the history only hides: declining does nothing, the files stay, and it stays gone.
+    const current = await page.evaluate(async () => {
+        const jobs = await (await fetch('/api/jobs')).json();
+        return { ids: jobs.map(job => job.id), shown: !document.getElementById('result').hidden };
+    });
+    assert.equal(current.shown, true);
+    page.once('dialog', dialog => dialog.dismiss());
+    await page.$eval('#history li .remove', el => el.click()); // in one go: the list may be redrawn
+    assert.equal(await page.$eval('#history', el => el.children.length), 3, 'declined');
+    page.once('dialog', dialog => dialog.accept());
+    await page.$eval('#history li .remove', el => el.click()); // in one go: the list may be redrawn
+    await page.waitForFunction(() => document.querySelectorAll('#history li').length === 2);
+    assert.equal(await page.$eval('#result', el => el.hidden), true, 'the removed job leaves the screen');
+    assert.equal(await page.$eval('#empty', el => el.hidden), false);
+    assert.equal((await fetch(`${baseUrl}/api/jobs/${current.ids[0]}`)).status, 200, 'its files are still there');
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.glbsmith);
+    assert.equal(await page.$eval('#history', el => el.children.length), 2);
     assert.deepEqual(errors, []);
     console.log('UI smoke test passed');
 } finally {

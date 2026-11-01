@@ -469,3 +469,28 @@ def test_path_traversal_is_refused(client):
     job_id = submit(client).json()["id"]
     assert client.get(f"/api/jobs/{job_id}/renders/..%2Fbrief.json").status_code == 404
     wait(client, job_id, {"done", "failed"})
+
+
+def test_hiding_takes_a_job_off_the_history_and_keeps_its_files(client, tmp_path):
+    job = wait(client, submit(client).json()["id"], {"done", "failed"})
+    before = {p.name for p in (tmp_path / job["id"]).iterdir()}
+    assert client.post(f"/api/jobs/{job['id']}/hide").status_code == 200
+    assert client.get("/api/jobs").json() == []
+    assert {p.name for p in (tmp_path / job["id"]).iterdir()} == before | {"hidden"}
+    assert client.get(f"/api/jobs/{job['id']}").status_code == 200
+    assert client.get(f"/api/jobs/{job['id']}/model.glb").content[:4] == b"glTF"
+    (tmp_path / job["id"] / "hidden").unlink()  # how the README says to bring it back
+    assert [j["id"] for j in client.get("/api/jobs").json()] == [job["id"]]
+
+
+def test_a_job_at_work_cannot_be_hidden(client, tmp_path):
+    job_id = submit(client).json()["id"]
+    assert client.post(f"/api/jobs/{job_id}/hide").status_code == 409
+    assert not (tmp_path / job_id / "hidden").exists()
+    client.post(f"/api/jobs/{job_id}/cancel")
+    wait(client, job_id, {"cancelled", "done", "failed"})
+    assert client.post(f"/api/jobs/{job_id}/hide").status_code == 200
+
+
+def test_hiding_an_unknown_job_is_not_found(client):
+    assert client.post("/api/jobs/nosuchjob/hide").status_code == 404

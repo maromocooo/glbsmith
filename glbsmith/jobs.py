@@ -11,6 +11,7 @@ from pathlib import Path
 from . import run as runner
 
 MAX_CONCURRENCY = min(8, os.cpu_count() or 1)
+HIDDEN = "hidden"  # a file in a job's folder that keeps it out of the history
 
 
 class Jobs:
@@ -83,7 +84,7 @@ class Jobs:
                 "created": (path / "brief.json").stat().st_mtime}
 
     def all(self) -> list[dict]:
-        found = [self.get(p.name) for p in self.root.iterdir() if p.is_dir()]
+        found = [self.get(p.name) for p in self.root.iterdir() if p.is_dir() and not (p / HIDDEN).exists()]
         return sorted((j for j in found if j), key=lambda j: -j["created"])
 
     # ---- queue ----
@@ -124,6 +125,15 @@ class Jobs:
                 self.queue.remove(job_id)
             self._kill(self.running.get(job_id))
             self._changed.notify_all()
+        return True
+
+    def hide(self, job_id: str) -> bool:
+        """Takes a job off the history and leaves its files alone. A job still at work has to be cancelled first."""
+        with self._lock:
+            state = self._read(self.root / job_id)
+            if state and state["status"] in ("queued", "running"):
+                return False
+            (self.root / job_id / HIDDEN).touch()
         return True
 
     def _kill(self, process) -> None:

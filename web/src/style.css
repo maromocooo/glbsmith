@@ -75,9 +75,13 @@ button:disabled { opacity: .5; cursor: default; }
 .note { margin: 0; font-size: 12px; color: var(--muted); }
 .note.warn { color: var(--warn); background: var(--warn-bg); padding: 8px 10px; border-radius: 8px; }
 .note.error, .failed { color: var(--error); }
-.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.history button { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; padding: 6px; background: transparent; border-color: transparent; }
-.history button:hover, .history button[aria-current=true] { background: var(--bg); border-color: var(--border); }
+.history { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.history li:not(.note) { display: flex; align-items: center; border: 1px solid transparent; border-radius: 8px; }
+.history li:hover, .history li:has([aria-current=true]) { background: var(--bg); border-color: var(--border); }
+.history button { background: transparent; border: 0; }
+.history .open { flex: 1; min-width: 0; display: flex; gap: 10px; align-items: center; text-align: left; padding: 6px; }
+.history .remove { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin-right: 4px; padding: 0; color: var(--muted); }
+.history .remove:hover { color: var(--text); background: var(--surface); }
 .history img { width: 36px; height: 36px; object-fit: contain; background: #fff; border-radius: 4px; flex: none; }
 .history span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history small { display: block; color: var(--muted); }

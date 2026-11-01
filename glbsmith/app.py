@@ -204,6 +204,13 @@ def create_app(root: Path = JOBS) -> FastAPI:
         job_path(job_id)
         return {"cancelled": jobs.cancel(job_id)}
 
+    @app.post("/api/jobs/{job_id}/hide")
+    def hide(job_id: str):
+        job_path(job_id)
+        if not jobs.hide(job_id):
+            raise HTTPException(409, "Cancel this job first.")
+        return {"hidden": True}
+
     @app.get("/api/jobs/{job_id}/reference/{number}")
     def reference(job_id: str, number: int):
         path = job_path(job_id)

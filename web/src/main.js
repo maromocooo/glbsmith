@@ -145,6 +145,7 @@ $('form').addEventListener('submit', async e => {
 // ---- history ----
 const shortNumber = value => new Intl.NumberFormat(getLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 const tokenDetail = tokens => t('tokenDetail', Object.fromEntries(Object.entries(tokens).map(([key, value]) => [key, value.toLocaleString(getLanguage())])));
+const TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/></svg>';
 let history = [];
 async function refreshHistory() {
     history = await api('/api/jobs');
@@ -183,6 +184,7 @@ function renderHistory() {
         const item = document.createElement('li');
         const button = document.createElement('button');
         button.type = 'button';
+        button.className = 'open';
         button.setAttribute('aria-current', String(job.id === currentId));
         button.addEventListener('click', () => show(job.id));
         const image = Object.assign(document.createElement('img'), { src: `/api/jobs/${job.id}/reference/0`, alt: '', loading: 'lazy' });
@@ -195,8 +197,34 @@ function renderHistory() {
         text.append(detail);
         button.append(image, text);
         item.append(button);
+        // A job at work would go on using quota out of sight, so it has to be cancelled first.
+        if (job.status !== 'queued' && job.status !== 'running') {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'remove';
+            remove.title = t('removeFromHistory');
+            remove.setAttribute('aria-label', t('removeFromHistory'));
+            remove.innerHTML = TRASH_ICON;
+            remove.addEventListener('click', () => removeFromHistory(job.id));
+            item.append(remove);
+        }
         return item;
     }));
+}
+
+async function removeFromHistory(id) {
+    if (!confirm(t('removeConfirm'))) return;
+    await api(`/api/jobs/${id}/hide`, { method: 'POST' });
+    if (id === currentId) {
+        currentId = null;
+        currentJob = null;
+        source?.close();
+        closeRevise();
+        viewer.clear();
+        $('result').hidden = true;
+        $('empty').hidden = false;
+    }
+    await refreshHistory();
 }
 
 // ---- result ----

@@ -103,6 +103,10 @@ The agent reopens the same Blender scene and is told to change only what was ask
 
 A revision follows your instructions rather than the original size and photo: parts may go beyond the original box, and the check against the photo is optional. The file is written at the size it was built.
 
+## Removing from the history
+
+The bin icon next to a finished entry takes it off the history. Nothing is deleted: its folder stays in `jobs/`, models revised from it keep working, and `list_models` over MCP still lists it. To bring it back, delete the file named `hidden` in that folder. A job still at work has to be cancelled first.
+
 ## What the GLB guarantees
 
 The size you enter is the **box the item must fit in**, and the photo decides the proportions. `finalize` measures the model itself rather than trusting the agent:
